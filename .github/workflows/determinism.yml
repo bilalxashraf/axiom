@@ -1,0 +1,57 @@
+name: Determinism stress
+
+on:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: determinism-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stress:
+    name: ${{ matrix.os }} / ${{ matrix.timezone }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            timezone: UTC
+            locale: C
+          - os: ubuntu-latest
+            timezone: Asia/Kolkata
+            locale: en_US.UTF-8
+          - os: macos-latest
+            timezone: America/Los_Angeles
+            locale: en_US.UTF-8
+          - os: windows-latest
+            timezone: UTC
+            locale: en-US
+    env:
+      TZ: ${{ matrix.timezone }}
+      LANG: ${{ matrix.locale }}
+      AXIOM_PROPERTY_CASES: "20000"
+      AXIOM_FUZZ_CASES: "25000"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js 24 LTS
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run deterministic property and mutation corpus
+        run: npm test

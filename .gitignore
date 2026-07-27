@@ -1,0 +1,6 @@
+node_modules/
+dist/
+coverage/
+*.axlog
+*.air
+.DS_Store

@@ -1,0 +1,148 @@
+{
+  "format": "AXIOM-CONFORMANCE/0.1",
+  "frozen": true,
+  "versions": {
+    "language": "0.1",
+    "air": "AIR/0.1",
+    "axip": "AXIP/1",
+    "axlock": "AXLOCK/0.1",
+    "axlog": "AXLOG/0.1",
+    "toolchain": "@axiom-lang/core@0.2.0"
+  },
+  "canonical_json": {
+    "valid": [
+      {
+        "name": "unicode-scalar-key-order",
+        "input_json": "{\"😀\":2,\"\":1,\"é\":3,\"é\":4}",
+        "canonical": "{\"é\":3,\"é\":4,\"\":1,\"😀\":2}",
+        "canonical_hash": "sha256:162f454fd4c79c251aef439c8e66ab57ad6b007551806fed166074fdb0f6ac11"
+      },
+      {
+        "name": "safe-integer-and-negative-zero",
+        "input_json": "{\"z\":-0,\"a\":9007199254740991}",
+        "canonical": "{\"a\":9007199254740991,\"z\":0}",
+        "canonical_hash": "sha256:e438d21b500f1f13c36cbc1e259cf64fe456563e9c8e34ce33033b16ed643bdf"
+      }
+    ],
+    "rejected": [
+      {
+        "name": "lone-surrogate",
+        "input_json": "\"\\ud800\"",
+        "error": "CanonicalJsonError"
+      },
+      {
+        "name": "fraction",
+        "input_json": "1.5",
+        "error": "CanonicalJsonError"
+      },
+      {
+        "name": "unsafe-integer",
+        "input_json": "9007199254740992",
+        "error": "CanonicalJsonError"
+      },
+      {
+        "name": "duplicate-key",
+        "input_json": "{\"a\":1,\"a\":2}",
+        "error": "CanonicalJsonError"
+      }
+    ]
+  },
+  "program": {
+    "source_name": "core-001.ax",
+    "source": "axiom 0.1;\n\nrecord Result {\n  text: Text;\n  scalars: Int;\n  bytes: Int;\n}\n\ntask Main(value: Text) -> Result\nmust {}\n{\n  complete Result {\n    text: value,\n    scalars: len(value),\n    bytes: utf8_bytes(value),\n  };\n}\n",
+    "source_hash": "sha256:d722fea58d90a0b96b7f814c0adba84fb7253e26343bbbc75835f4a69cd3d9c8",
+    "semantic_hash": "sha256:06b5be030e0d0b2d5474a7862ebda8a08b986c693c461b7135447880e8ef2465",
+    "artifact_hash": "sha256:7dc2a3af6f04b94dc20e9420ecddfd6f787ef127200307b43488dd2198e61272",
+    "canonical_air": "{\"format\":\"AIR/0.1\",\"language\":\"0.1\",\"ports\":[],\"propositions\":[],\"records\":[{\"fields\":[{\"name\":\"text\",\"type\":{\"kind\":\"named\",\"name\":\"Text\"}},{\"name\":\"scalars\",\"type\":{\"kind\":\"named\",\"name\":\"Int\"}},{\"name\":\"bytes\",\"type\":{\"kind\":\"named\",\"name\":\"Int\"}}],\"name\":\"Result\"}],\"sourceHash\":\"sha256:d722fea58d90a0b96b7f814c0adba84fb7253e26343bbbc75835f4a69cd3d9c8\",\"tasks\":[{\"name\":\"Main\",\"obligations\":[],\"operations\":[{\"op\":\"complete\",\"site\":0,\"value\":{\"fields\":[{\"name\":\"text\",\"value\":{\"kind\":\"variable\",\"name\":\"value\"}},{\"name\":\"scalars\",\"value\":{\"arguments\":[{\"kind\":\"variable\",\"name\":\"value\"}],\"callee\":\"len\",\"kind\":\"call\"}},{\"name\":\"bytes\",\"value\":{\"arguments\":[{\"kind\":\"variable\",\"name\":\"value\"}],\"callee\":\"utf8_bytes\",\"kind\":\"call\"}}],\"kind\":\"record\",\"record\":\"Result\"}}],\"parameters\":[{\"name\":\"value\",\"type\":{\"kind\":\"named\",\"name\":\"Text\"}}],\"returns\":{\"kind\":\"named\",\"name\":\"Result\"}}]}",
+    "canonical_air_utf8_bytes": 889,
+    "lock": {
+      "format": "AXLOCK/0.1",
+      "toolchain": {
+        "name": "@axiom-lang/core",
+        "version": "0.2.0",
+        "language": "0.1",
+        "air": "AIR/0.1",
+        "protocol": "AXIP/1"
+      },
+      "program": {
+        "semantic_hash": "sha256:06b5be030e0d0b2d5474a7862ebda8a08b986c693c461b7135447880e8ef2465",
+        "artifact_hash": "sha256:7dc2a3af6f04b94dc20e9420ecddfd6f787ef127200307b43488dd2198e61272",
+        "source_hash": "sha256:d722fea58d90a0b96b7f814c0adba84fb7253e26343bbbc75835f4a69cd3d9c8"
+      },
+      "binding": null,
+      "ports": [],
+      "tasks": [
+        {
+          "name": "Main",
+          "ports": [],
+          "operation_bound": 1,
+          "effect_bound": 0,
+          "model_attempt_bound": 0,
+          "write_bound": 0,
+          "task_hash": "sha256:d3b075dcd873cfe5f8c33f565ec0ac3ff91bdf3f2636862a952fa9eb147ae322"
+        }
+      ]
+    }
+  },
+  "execution": {
+    "task": "Main",
+    "run_id": "golden-run-001",
+    "input": {
+      "value": "😀é"
+    },
+    "value": {
+      "text": "😀é",
+      "scalars": 3,
+      "bytes": 7
+    },
+    "ledger_entries": [
+      {
+        "sequence": 0,
+        "kind": "run",
+        "payload": {
+          "format": "AXLOG/0.1",
+          "run_id": "golden-run-001",
+          "program_hash": "sha256:06b5be030e0d0b2d5474a7862ebda8a08b986c693c461b7135447880e8ef2465",
+          "artifact_hash": "sha256:7dc2a3af6f04b94dc20e9420ecddfd6f787ef127200307b43488dd2198e61272",
+          "source_hash": "sha256:d722fea58d90a0b96b7f814c0adba84fb7253e26343bbbc75835f4a69cd3d9c8",
+          "task": "Main",
+          "input_hash": "sha256:3740fa5ad6a41010932d67f850b8f5ec51770604f30493c6b30be2c77f77b055",
+          "trusted_bindings": null,
+          "mode": "live"
+        },
+        "previous": "sha256:genesis",
+        "hash": "sha256:7595b3d9a725877b1ce455424344d2dcab958e6cb513c35094dade1e8b6b34e4"
+      },
+      {
+        "sequence": 1,
+        "kind": "success",
+        "payload": {
+          "value": {
+            "text": "😀é",
+            "scalars": 3,
+            "bytes": 7
+          },
+          "world_epoch": 0,
+          "obligations": {}
+        },
+        "previous": "sha256:7595b3d9a725877b1ce455424344d2dcab958e6cb513c35094dade1e8b6b34e4",
+        "hash": "sha256:32016701aa8accf63f3d36c7732c3a2548302cbad4e017b9e0e963c5cec240d0"
+      }
+    ],
+    "ledger_root": "sha256:32016701aa8accf63f3d36c7732c3a2548302cbad4e017b9e0e963c5cec240d0"
+  },
+  "protocol": {
+    "prologue_hash": "sha256:340a44fdbcc57fb72cc436fa65adf3825fca7da66597015fe58c6ad23fba312c",
+    "request_payload": "{\"a\":[\"c\",\"n\",\"f\"],\"b\":[16384,4096,1024,2],\"c\":[\"sha256:golden-context\"],\"g\":[\"typed-answer\"],\"h\":\"sha256:340a44fdbcc57fb72cc436fa65adf3825fca7da66597015fe58c6ad23fba312c\",\"i\":[\"o\",[[\"text\",[\"s\",1,16]]]],\"n\":\"Main:0:planner\",\"o\":\"Return the input text and its Unicode scalar count.\",\"p\":\"sha256:06b5be030e0d0b2d5474a7862ebda8a08b986c693c461b7135447880e8ef2465\",\"r\":\"golden-run-001\",\"u\":[\"o\",[[\"text\",[\"s\",1,16]],[\"scalars\",[\"i\",1,16]]]],\"x\":{\"text\":\"😀é\"}}",
+    "request_hash": "sha256:30450376e90886c4043b8fe8eed833e5bb3993e701884eda49edabaf5304f1c8",
+    "inline_frame": "AXP1\nAct as a typed inference function. Read the AXF1 JSON frame.\nKeys: r=run, p=program, n=node, o=operation, i=input schema, u=output schema, x=inputs, g=active obligations, a=allowed outputs(c/n/f), b=limits[input bytes/output bytes/tokens/attempts], c=context refs, d=definitions, h=prologue ref.\nSchema: \"*\"=any, \"0\"=null, \"b\"=boolean, \"s\"=string, \"n\"=number, \"i\"=integer. Tagged arrays: [\"s\",min?,max?,pattern?], [\"n\"|\"i\",min?,max?], [\"=\",literal], [\"e\",...values], [\"a\",item,min?,max?], [\"t\",items,rest?], [\"o\",[[name,schema,optional-0?]],additional?], [\"u\",...variants], [\"r\",name]. null placeholders mean omitted.\nReply with only AXO1 then JSON. Echo r and n. k=\"c\": include v matching u; k=\"n\": include q, refs from c; k=\"f\": include e={c:code,m:message,r:retryable,d?:details}.\nUse only a response kind listed in a. Do not add keys, prose, or markdown.\nAXF1\n{\"a\":[\"c\",\"n\",\"f\"],\"b\":[16384,4096,1024,2],\"c\":[\"sha256:golden-context\"],\"g\":[\"typed-answer\"],\"h\":\"sha256:340a44fdbcc57fb72cc436fa65adf3825fca7da66597015fe58c6ad23fba312c\",\"i\":[\"o\",[[\"text\",[\"s\",1,16]]]],\"n\":\"Main:0:planner\",\"o\":\"Return the input text and its Unicode scalar count.\",\"p\":\"sha256:06b5be030e0d0b2d5474a7862ebda8a08b986c693c461b7135447880e8ef2465\",\"r\":\"golden-run-001\",\"u\":[\"o\",[[\"text\",[\"s\",1,16]],[\"scalars\",[\"i\",1,16]]]],\"x\":{\"text\":\"😀é\"}}",
+    "inline_frame_hash": "sha256:93e339eb410b3452204c7d95a2e036d5dd4f34dfb2691fa4246e4592671bc41b",
+    "inline_frame_utf8_bytes": 1329,
+    "referenced_frame": "AXP1 @sha256:340a44fdbcc57fb72cc436fa65adf3825fca7da66597015fe58c6ad23fba312c\nAXF1\n{\"a\":[\"c\",\"n\",\"f\"],\"b\":[16384,4096,1024,2],\"c\":[\"sha256:golden-context\"],\"g\":[\"typed-answer\"],\"h\":\"sha256:340a44fdbcc57fb72cc436fa65adf3825fca7da66597015fe58c6ad23fba312c\",\"i\":[\"o\",[[\"text\",[\"s\",1,16]]]],\"n\":\"Main:0:planner\",\"o\":\"Return the input text and its Unicode scalar count.\",\"p\":\"sha256:06b5be030e0d0b2d5474a7862ebda8a08b986c693c461b7135447880e8ef2465\",\"r\":\"golden-run-001\",\"u\":[\"o\",[[\"text\",[\"s\",1,16]],[\"scalars\",[\"i\",1,16]]]],\"x\":{\"text\":\"😀é\"}}",
+    "referenced_frame_hash": "sha256:0e4d9d3a94b914581b7b933094b349a61a1d6371bedbbe04ca4eb8d34a76b88e",
+    "referenced_frame_utf8_bytes": 543,
+    "candidate_response": "AXO1\n{\"k\":\"c\",\"n\":\"Main:0:planner\",\"r\":\"golden-run-001\",\"v\":{\"scalars\":3,\"text\":\"😀é\"}}",
+    "candidate_response_hash": "sha256:f8bc067f008bbccc072b884ed382a20eda1e4c1d52065d37cd6e38980f7d6735",
+    "candidate_response_utf8_bytes": 91
+  }
+}

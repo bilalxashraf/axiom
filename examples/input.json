@@ -1,0 +1,10 @@
+{
+  "issue": {
+    "summary": "The greeting still says hello after the product was renamed.",
+    "terms": [
+      "hello",
+      "greeting",
+      "product name"
+    ]
+  }
+}

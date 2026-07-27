@@ -1,0 +1,78 @@
+axiom 0.1;
+
+record Issue {
+  summary: Text;
+  terms: List<Text>;
+}
+
+record Facts {
+  files: List<Text>;
+}
+
+record PlannerInput {
+  issue: Issue;
+  facts: Facts;
+}
+
+record Plan {
+  file: Text;
+  patch: Text;
+}
+
+record Receipt {
+  changed: Bool;
+}
+
+record TestResult {
+  exit_code: Int;
+}
+
+record FixResult {
+  receipt: Receipt;
+}
+
+proposition Inspected event;
+proposition Applied event;
+proposition TestsPass state;
+
+extern tool inspect(issue: Issue) -> Facts mode read;
+extern tool apply(plan: Plan) -> Receipt mode write;
+extern tool test(input: Unit) -> TestResult mode read;
+
+extern model planner(input: PlannerInput) -> Plan
+  intent "Choose one relevant file and propose the smallest patch.";
+
+extern validator safe_plan(raw: Candidate<Plan>, facts: Facts) -> Plan;
+
+extern verifier nonempty(facts: Facts) proves Inspected;
+extern verifier changed(receipt: Receipt) proves Applied;
+extern verifier exit_zero(result: TestResult) proves TestsPass;
+
+task Fix(issue: Issue) -> FixResult
+must {
+  inspected: Inspected;
+  applied: Applied;
+  tests: TestsPass;
+}
+{
+  observe facts = inspect(issue);
+  verify inspection_evidence = nonempty(facts);
+  satisfy inspected with inspection_evidence;
+
+  infer raw_plan = planner(PlannerInput {
+    issue: issue,
+    facts: facts,
+  }) limit input_bytes 16384 output_bytes 4096 attempts 2;
+
+  validate plan = safe_plan(raw_plan, facts);
+  act receipt = apply(plan) key hash(plan);
+
+  verify applied_evidence = changed(receipt);
+  satisfy applied with applied_evidence;
+
+  observe test_result = test(unit);
+  verify test_evidence = exit_zero(test_result);
+  satisfy tests with test_evidence;
+
+  complete FixResult { receipt: receipt };
+}

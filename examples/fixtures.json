@@ -1,0 +1,54 @@
+{
+  "tools": {
+    "inspect": [
+      {
+        "files": [
+          "src/greeter.ts"
+        ]
+      }
+    ],
+    "apply": [
+      {
+        "changed": true
+      }
+    ],
+    "test": [
+      {
+        "exit_code": 0
+      }
+    ]
+  },
+  "models": {
+    "planner": [
+      {
+        "file": "src/greeter.ts",
+        "patch": "replace greeting"
+      }
+    ]
+  },
+  "validators": {
+    "safe_plan": {
+      "kind": "identity",
+      "argument": 0
+    }
+  },
+  "verifiers": {
+    "nonempty": {
+      "kind": "nonempty",
+      "argument": 0,
+      "path": "files"
+    },
+    "changed": {
+      "kind": "equals",
+      "argument": 0,
+      "path": "changed",
+      "value": true
+    },
+    "exit_zero": {
+      "kind": "equals",
+      "argument": 0,
+      "path": "exit_code",
+      "value": 0
+    }
+  }
+}
