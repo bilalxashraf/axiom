@@ -1,27 +1,110 @@
 # Axiom
 
-Axiom is an experimental, proof-carrying execution language for AI agents.
-Humans or agents write `.ax` programs; a deterministic runtime owns control
-flow, effects, obligations, and completion. Models are called only at explicit
-`infer` sites and return untrusted `Candidate<T>` values.
+**A typed, proof-carrying execution language for AI agents.**
 
-The `@axiom-lang/core` 0.2 toolchain implements the deliberately small Axiom
-Core 0.1 language and AIR/0.1. It is an alpha suitable for evaluation and
-conformance work, not a claim that arbitrary live model output is
-deterministic or that production sandboxes are no longer necessary.
+[![CI](https://github.com/bilalxashraf/axiom/actions/workflows/ci.yml/badge.svg)](https://github.com/bilalxashraf/axiom/actions/workflows/ci.yml)
+[![Security](https://github.com/bilalxashraf/axiom/actions/workflows/security.yml/badge.svg)](https://github.com/bilalxashraf/axiom/actions/workflows/security.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-The central guarantee of the certified core is:
+Axiom moves operational agent instructions out of repeatedly interpreted
+Markdown and into checked `.ax` programs. The runtime—not the model—owns
+control flow, tool authority, validation, evidence, obligation tracking, and
+completion. Models are invoked only at explicit `infer` sites and their output
+enters the program as an untrusted `Candidate<T>`.
 
-> A task cannot complete successfully while one of its declared obligations is
-> unresolved.
+The core invariant is:
 
-This is narrower—and more useful—than claiming that a model always understands
-prose or that every task will succeed. Axiom can prevent silent omission of a
-formal instruction. It cannot make an impossible instruction possible, prove a
-subjective claim without a verifier, or force different models to produce the
-same candidate.
+> A task cannot complete successfully while any of its declared obligations
+> remains unresolved.
 
-## A small program
+That is a deliberately precise claim. Axiom can prevent the silent omission of
+an instruction that has been formalized as an obligation. It cannot make an
+LLM deterministic, make an impossible task succeed, prove that a verifier
+captures human intent, or turn a host process into a security sandbox.
+
+## Status
+
+| Component | Current version or status |
+| --- | --- |
+| Reference package | `@axiom-lang/core` **0.2.0** |
+| Source language | **Axiom Core 0.1** (`axiom 0.1;`) |
+| Executable IR | `AIR/0.1` |
+| Model protocol | `AXIP/1` |
+| Lock, ledger, and Markdown map | `AXLOCK/0.1`, `AXLOG/0.1`, `AXMAP/0.1` |
+| Runtime | TypeScript on Node.js 24+ |
+| Maturity | Alpha research preview |
+| License | Apache-2.0 |
+
+The package and language versions are intentionally different. `0.2.0` is the
+version of the TypeScript toolchain; it implements the deliberately small,
+versioned Core 0.1 language and its interoperability formats.
+
+This repository is suitable for evaluation, language design, conformance
+work, deterministic fixtures, and controlled experiments. It is not yet a
+production security boundary or an AGI mechanism.
+
+## Why Axiom
+
+An agent instruction file often mixes requirements, background, examples,
+preferences, permissions, and completion criteria in one prose document. A
+model must reinterpret that mixture on every call, and a conventional harness
+must separately decide what the model may do and whether the task is finished.
+
+Axiom gives those concerns executable forms:
+
+| Problem | Axiom mechanism |
+| --- | --- |
+| Required work can be forgotten | Named `must` obligations block `complete` |
+| Model output may be malformed or unsafe | `Candidate<T>` is unusable until a trusted `validator` narrows it |
+| Prompts implicitly grant tool authority | Only declared ports can be called at typed operation sites |
+| Writes may be duplicated | Every `act` has a domain-separated idempotency key |
+| “Done” is a subjective model judgment | Trusted `verifier` evidence is consumed by `satisfy` |
+| Runs are difficult to reproduce | Canonical AIR, locks, append-only ledgers, and replay |
+| Markdown migration can silently drop prose | Lossless import, explicit span disposition, and a source-wide review seal |
+| Full instruction files consume context repeatedly | Bounded, node-local AXIP frames instead of the full source |
+
+Markdown remains useful for documentation. Axiom targets the part that governs
+execution.
+
+## Quick start
+
+The reference implementation requires Node.js 24 or newer. From a checkout:
+
+```sh
+npm ci --ignore-scripts
+npm run check
+```
+
+The complete fixture-backed demo is offline after dependencies are installed:
+
+```sh
+node dist/src/cli.js check examples/fix.ax
+
+node dist/src/cli.js lock examples/fix.ax \
+  -o axiom.lock \
+  --fixtures examples/fixtures.json
+
+node dist/src/cli.js run examples/fix.ax \
+  --task Fix \
+  --input examples/input.json \
+  --fixtures examples/fixtures.json \
+  --lock axiom.lock \
+  --ledger run.axlog
+
+node dist/src/cli.js replay examples/fix.ax \
+  --task Fix \
+  --input examples/input.json \
+  --ledger run.axlog
+```
+
+Use `npm link` to expose the local `axiom` binary, or keep using
+`node dist/src/cli.js`.
+
+## The language at a glance
+
+This runnable example inspects an issue, asks a model for a patch proposal,
+validates it, applies it, runs tests, proves the declared obligations, and only
+then completes:
 
 ```axiom
 axiom 0.1;
@@ -104,225 +187,542 @@ must {
 }
 ```
 
-`planner` may be backed by any model adapter. It does not receive permission to
-call tools, satisfy obligations, or complete the task. `safe_plan` must turn its
-candidate into a validated `Plan` before `apply` can consume it.
+The model cannot call `inspect`, `apply`, or `test`. It cannot mint evidence,
+satisfy an obligation, or complete the task. It can only return a candidate
+for the declared `Plan` schema. The trusted `safe_plan` validator must convert
+that candidate into an ordinary `Plan` before the write port can consume it.
 
-See [`examples/fix.ax`](examples/fix.ax) for the complete runnable example.
+The same program, deterministic input, and fixture bindings are in
+[`examples/`](examples).
 
-## Try the prototype
+### Core declarations and operations
 
-Axiom currently requires Node.js 24 or newer.
+| Form | Role |
+| --- | --- |
+| `record` | Declares closed, JSON-shaped data |
+| `proposition ... event/state` | Names a claim that trusted code may establish |
+| `extern tool` | Declares a typed read or write boundary |
+| `extern model` | Declares an explicit nondeterministic inference boundary |
+| `extern validator` | Narrows `Candidate<T>` into trusted program data |
+| `extern verifier` | Produces proposition-specific evidence |
+| `task ... must` | Declares a finite workflow and mandatory obligations |
+| `observe` | Calls a read-only tool |
+| `infer` | Calls a model under byte and attempt limits |
+| `validate` | Sends a candidate to a declared validator |
+| `act` | Calls a write tool with an idempotency key |
+| `verify` | Asks a verifier to establish a proposition |
+| `satisfy` | Consumes matching evidence and resolves one obligation |
+| `complete` | Succeeds only when every obligation is currently satisfied |
+| `assert` / `fail` | Terminates unsuccessfully when a condition or task fails |
 
-```sh
-npm install
-npm run build
-npm test
+Core 0.1 deliberately has no certified branch, loop, recursion, concurrency,
+dynamic evaluation, or dynamic task generation. Every accepted task has a
+finite, source-ordered operation sequence and one explicit terminal operation.
+See [`docs/LANGUAGE.md`](docs/LANGUAGE.md) and the normative
+[`spec/grammar.ebnf`](spec/grammar.ebnf).
+
+## Architecture and execution
+
+```mermaid
+flowchart LR
+    MD["Optional Markdown source"] --> IMP["Lossless import and AXMAP review"]
+    IMP --> AX["Axiom .ax source"]
+    AX --> CHECK["Parser and type checker"]
+    CHECK --> AIR["Canonical AIR/0.1"]
+    AIR --> VERIFY["Strict AIR verifier"]
+    LOCK["Optional AXLOCK/0.1"] --> VM["Deterministic VM"]
+    VERIFY --> VM
+    VM --> PORTS["Declared tools, validators, and verifiers"]
+    VM --> AXIP["Bounded AXIP/1 frame"]
+    AXIP --> MODEL["Model through an adapter"]
+    MODEL --> CANDIDATE["Untrusted Candidate<T>"]
+    CANDIDATE --> VM
+    PORTS --> VM
+    VM --> LOG["Append-only AXLOG/0.1 ledger"]
+    LOG --> REPLAY["Deterministic replay"]
 ```
 
-The CLI workflow is shown below. In a local checkout, either put the package
-binary on `PATH` with `npm link` or replace `axiom` with
-`node dist/src/cli.js`.
+The execution path is:
+
+1. The checker parses source, checks types and port modes, confines candidate
+   values, and proves that completion cannot bypass obligation resolution.
+2. The compiler emits canonical `AIR/0.1` and separate semantic and artifact
+   hashes.
+3. A strict AIR verifier independently re-establishes the runtime safety
+   invariants before AIR is admitted.
+4. An optional `AXLOCK/0.1` freezes formats, hashes, exact port signatures,
+   inferred least-authority port sets, static bounds, and an optional trusted
+   binding fingerprint.
+5. The VM evaluates immutable bindings and operations in source order.
+6. Every model, tool, validator, and verifier call occurs at a declared effect
+   site. Durable execution records intent before dispatch and outcome after.
+7. `complete` succeeds only after each obligation has consumed matching,
+   verifier-minted evidence.
+8. Replay substitutes recorded outcomes and checks the same effect requests,
+   obligation transitions, and terminal result without live calls.
+
+The runtime is a standardized static harness generated from the program. Axiom
+does not eliminate the need for a runtime, model adapter, durable store, or
+host security boundary; it makes their responsibilities explicit and smaller.
+
+## What “deterministic” means
+
+Axiom separates four commonly conflated properties:
+
+| Level | Property | Core 0.1 |
+| --- | --- | --- |
+| **D1 — Artifact determinism** | Same accepted source, verified sidecars, and pinned toolchain produce byte-identical canonical AIR and hashes | Guaranteed under the documented trust assumptions |
+| **D2 — Control determinism** | Same verified AIR, input, policy, and ordered external outcomes produce the same state transitions and terminal result | Guaranteed under the documented trust assumptions |
+| **D3 — Replay determinism** | Same program, input, run identity, and complete valid ledger reproduce the recorded execution without live effects | Guaranteed under the documented trust assumptions |
+| **D4 — Live-world reproducibility** | Separate live runs return the same model output, observations, timing, and receipts | **Not guaranteed** |
+
+The defensible summary is:
+
+> Axiom makes program control, authority checks, obligation accounting, and
+> replay deterministic. It exposes model and external-world variation as
+> typed, bounded, recorded outcomes.
+
+Two live calls to the same model may still differ. Different models may
+produce different candidates. A service, file, user, or database may change
+between observations. Temperature zero and a seed are operational controls,
+not proofs of live reproducibility.
+
+Comments and formatting may change source provenance and the exact AIR
+artifact hash while preserving the domain-separated semantic hash. Given the
+same semantic program, task input, runtime policy, run identity, and recorded
+external outcomes, replay follows the same checked transition sequence.
+
+Read the complete conditions in
+[`docs/GUARANTEES.md`](docs/GUARANTEES.md).
+
+## Guarantees and non-guarantees
+
+### Core 0.1 enforces
+
+- Successful completion requires every declared obligation to be satisfied.
+- Evidence is nominal, proposition-specific, and consumed linearly.
+- A satisfied `state` obligation is invalidated after a later `act`; an
+  `event` obligation remains satisfied.
+- Model output remains `Candidate<T>` and may flow only to a declared
+  validator as its top-level candidate argument.
+- Only declared ports can be invoked, with checked arguments, result types,
+  read/write modes, and operation kinds.
+- Every write carries a stable identity derived from the semantic program,
+  task, input, operation site, user key, and argument hash.
+- Inference input bytes, output bytes, and attempts are finite and enforced.
+- Canonical data, AIR, protocol frames, locks, and ledger entries have strict
+  versioned forms.
+- Locked execution fails before dispatch when the program or trusted binding
+  set does not exactly match.
+- Replay rejects missing, extra, reordered, or mismatched external effects.
+
+### Core 0.1 does not guarantee
+
+- identical output from independent live model calls;
+- that every model is capable of producing the required candidate;
+- correctness, honesty, isolation, or completeness of trusted validators,
+  verifiers, tools, and adapters;
+- operating-system, filesystem, network, secret, approval, identity, or
+  monetary isolation;
+- exactly-once remote writes unless the host persistently deduplicates Axiom's
+  idempotency key;
+- that a timed-out write did not commit remotely;
+- ledger authenticity when an attacker can replace the ledger and its
+  unanchored hash-chain root;
+- automatic semantic equivalence between Markdown prose and an Axiom program;
+- a minimum token count or universal token-savings percentage; or
+- AGI, task success, truth, safety, or alignment merely because a program uses
+  Axiom.
+
+The trusted computing base and residual risks are detailed in
+[`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md).
+
+## CLI
+
+After `npm run build`, use `node dist/src/cli.js`; after `npm link`, use
+`axiom`.
+
+| Command | Purpose |
+| --- | --- |
+| `import-md` | Create a lossless migration draft and `AXMAP/0.1` sidecar |
+| `check` | Parse, type-check, and prove obligation-flow safety |
+| `compile` | Emit canonical `AIR/0.1` JSON |
+| `lock` | Freeze program facts, capabilities, bounds, and host bindings |
+| `verify-lock` | Fail unless a program and binding set exactly match a lock |
+| `run` | Execute with fixture-backed tools and a fixture or HTTP model |
+| `replay` | Re-execute from a ledger without calling models or tools |
+| `frame` | Run against fixtures and print each compact AXIP model frame |
+| `conform` | Probe an HTTP model adapter for baseline AXIP/1 compatibility |
+
+Common workflows:
+
+```sh
+# Check and compile
+axiom check workflow.ax
+axiom compile workflow.ax -o workflow.air
+
+# Create and verify a lock
+axiom lock workflow.ax -o axiom.lock \
+  --fixtures bindings.json
+axiom verify-lock workflow.ax --lock axiom.lock \
+  --fixtures bindings.json
+
+# Execute and retain a durable replay transcript
+axiom run workflow.ax \
+  --task TaskName \
+  --input input.json \
+  --fixtures bindings.json \
+  --lock axiom.lock \
+  --ledger run.axlog
+
+# Re-run without any live external calls
+axiom replay workflow.ax \
+  --task TaskName \
+  --input input.json \
+  --ledger run.axlog \
+  --output-ledger replay.axlog
+
+# Inspect the exact model-boundary frames
+axiom frame workflow.ax \
+  --task TaskName \
+  --input input.json \
+  --fixtures bindings.json
+
+# Check a direct AXIP endpoint
+axiom conform \
+  --adapter-url http://127.0.0.1:8080 \
+  --timeout-ms 30000
+```
+
+Live model attempts and tool, validator, and verifier calls have 30-second
+host deadlines by default. `run` and `frame` accept
+`--inference-timeout-ms` and `--effect-timeout-ms`. Cancellation bounds the
+host wait; it cannot undo an external write that already happened.
+
+There is no implicit lock search. Omitting `--lock` is an explicit unlocked
+alpha-mode execution.
+
+## Library API
+
+The package exports the compiler, strict AIR verifier, VM, adapters, protocol,
+canonical data utilities, locks, ledger, Markdown importer, schemas, and
+conformance probe:
+
+```ts
+import {
+  compileSource,
+  verifyAirProgram,
+} from "@axiom-lang/core";
+
+const compiled = compileSource(source, "workflow.ax");
+verifyAirProgram(compiled.program);
+
+console.log(compiled.hash);         // executable semantics
+console.log(compiled.artifactHash); // exact canonical AIR artifact
+```
+
+Runtime hosts implement the small `RuntimeBindings` interface: one model
+adapter plus typed tool, validator, and verifier calls. The reference package
+ships `TextFunctionAdapter`, `HttpTextAdapter`, `FixtureAdapter`, and
+`ReplayAdapter`.
+
+## Migrating Markdown without silent loss
+
+Any Markdown file can enter a lossless migration process:
 
 ```sh
 axiom import-md AGENTS.md -o AGENTS.ax
-axiom conform --adapter-url http://127.0.0.1:8080
-axiom check examples/fix.ax
-axiom compile examples/fix.ax -o fix.air
-axiom lock examples/fix.ax -o axiom.lock \
-  --fixtures examples/fixtures.json
-axiom verify-lock examples/fix.ax --lock axiom.lock \
-  --fixtures examples/fixtures.json
-axiom run examples/fix.ax \
-  --task Fix \
-  --input examples/input.json \
-  --fixtures examples/fixtures.json \
-  --lock axiom.lock \
-  --ledger run.axlog
-axiom replay examples/fix.ax \
-  --task Fix \
-  --input examples/input.json \
-  --ledger run.axlog
-axiom frame examples/fix.ax \
-  --task Fix \
-  --input examples/input.json \
-  --fixtures examples/fixtures.json
 ```
 
-`import-md` is deliberately conservative: it preserves the exact Markdown
-bytes in an `AXMAP/0.1` sidecar and emits an explicit `unresolved` declaration
-for every nonblank span. The draft parses, but strict compilation fails until
-those spans are formally resolved; the importer never guesses that prose is
-merely documentation. A reviewer replaces each unresolved disposition with
-one of:
+This writes:
+
+- `AGENTS.ax`, embedding the exact original bytes and declaring every
+  nonblank span as explicitly unresolved; and
+- `AGENTS.axmap.json`, an `AXMAP/0.1` coverage sidecar containing the source
+  hash, byte length, exact base64 payload, span ranges, span hashes, and
+  dispositions.
+
+The draft parses, but strict compilation fails until a reviewer classifies
+every nonblank span:
 
 ```axiom
 resolved span_000001 source markdown_source bytes 0 17
   hash "sha256:0123..." as requirement
-  task Fix obligation inspected reason "Reviewed as the inspection requirement.";
+  task Fix obligation inspected
+  reason "This span requires inspection before completion.";
 
 resolved span_000002 source markdown_source bytes 17 61
   hash "sha256:4567..." as non_normative
-  reason "Example text; it does not constrain execution.";
+  reason "This span is an explanatory example.";
 
 review markdown_source
   source_hash "sha256:SOURCE_HASH"
   dispositions_hash "sha256:CANONICAL_DISPOSITIONS_HASH";
 ```
 
-The first form must name an existing task obligation. The second requires an
-explicit reason for treating the span as non-normative. After all spans are
-dispositioned, one source-wide `review` seal binds the exact document hash and
-the compiler-derived hash of every disposition. The checker reports the exact
-seal expected after review. Per-span anchors catch edits and moves precisely;
-the source-wide seal also invalidates unchanged lines when surrounding context
-changes. This proves visible, content-bound coverage, not that an obligation is
-semantically equivalent to prose or that a reviewer was honest. CLI commands
-that load the `.ax` file require and validate its named `AXMAP/0.1` sidecar;
-`--map path` may supply an additional explicit anchor. See
+A `requirement` must link to an existing task obligation. A
+`non_normative` disposition needs an explicit reason. The final source-wide
+seal binds the entire imported document, every disposition, the linked
+propositions, and the executable formal declarations. Source edits, moved
+spans, changed dispositions, or changed formal semantics invalidate the
+review.
+
+This process proves exact byte retention, complete visible disposition, valid
+links, and seal freshness. It does **not** prove that a reviewer mapped natural
+language correctly or honestly. The importer never guesses away that
+responsibility. See
 [`docs/MARKDOWN-IMPORT.md`](docs/MARKDOWN-IMPORT.md).
 
-`check` rejects malformed programs, type errors, invalid port use, and
-completion paths with unresolved obligations. `compile` emits canonical
-`AIR/0.1`; a strict AIR verifier independently re-establishes the safety
-invariants before loaded or externally supplied AIR may run. `lock` emits
-canonical `AXLOCK/0.1`, freezing the toolchain profile, semantic and artifact
-hashes, exact port signatures, inferred least-authority port sets, static
-operation/effect/model-attempt/write bounds, and an optional trusted binding
-fingerprint. `verify-lock` compares the whole lock fail-closed.
-`run --lock` and `frame --lock` perform that same whole-object check against
-the actual runtime binding fingerprint before any effect or model frame is
-dispatched. There is no implicit lock search: omitting `--lock` is an explicit
-unlocked alpha-mode execution.
+## Token and context efficiency
 
-`run --ledger path` creates a new append-only, fsynced write-ahead ledger.
-Every external call records `effect_intent` before dispatch and its outcome
-afterward; an intent without an outcome is explicitly uncertain rather than
-silently replayable. Every caught write failure is also marked
-`uncertain: true` for reconciliation. The ledger includes the trusted
-binding-set ID, optional SHA-256 fingerprint, and model-adapter ID.
-`replay` substitutes recorded effect responses and checks that execution
-reaches the same obligation transcript and terminal result without live
-calls. A ledger hash chain detects mutation relative to a trusted root; it is
-not a signature, MAC, or transparency log by itself. `frame` runs against
-fixtures and prints the compact AXIP model frame for inspection.
+Axiom source is compiled and executed; it is not copied into every model call.
+At an `infer` site, the model receives one bounded, node-local AXIP frame
+containing:
 
-Each live model attempt and each tool, validator, or verifier call has a
-30-second host deadline by default. Use
-`--inference-timeout-ms N` on `run` or `frame` to choose another positive
-model deadline and `--effect-timeout-ms N` for other effects. Bindings receive
-an abort signal; a timed-out external write remains marked uncertain because
-the remote system may ignore cancellation. For an HTTP endpoint that has
-already installed the exact AXIP prologue hash, `--cached-prologue` lets the
-runtime send the referenced prologue form; otherwise it safely sends the
-inline prologue.
+- stable protocol, program, run, and operation identities;
+- the selected model port's `intent`;
+- only the evaluated arguments declared by that port;
+- closed input and output schemas;
+- only record definitions reachable from those schemas;
+- current pending or stale obligation identifiers;
+- allowed response kinds and explicit budgets; and
+- the fixed semantic-prologue reference.
 
-## Why this is more deterministic than Markdown
+The frame excludes the `.ax` source, Markdown provenance, unrelated task
+bodies and records, comments, chat history, old model prose, and tool receipts
+that are not explicit arguments.
 
-Markdown asks a model to continually reinterpret a mixture of prose, examples,
-preferences, and rules. Axiom separates those roles:
+Efficiency is portable because Core 0.1 makes UTF-8 bytes—not provider tokens—
+normative:
 
-- `must` creates a named, linear obligation.
-- `observe` calls a read-only tool.
-- `infer` is the explicit nondeterministic boundary.
-- `validate` converts an untrusted candidate into a usable value.
-- `act` performs an idempotency-keyed write.
-- `verify` asks trusted code for proposition-specific evidence.
-- `satisfy` consumes matching evidence and resolves one obligation.
-- `complete` succeeds only when no obligation remains.
+```axiom
+infer raw_plan = planner(input)
+  limit input_bytes 16384 output_bytes 4096 attempts 2;
+```
 
-The same executable semantics compile to the same domain-separated semantic
-hash. Comments and formatting alter the source-provenance and AIR artifact
-hashes, but not effect identity or replay compatibility. Given the same
-semantic program, typed input, effective policy, and recorded external
-responses, replay follows the same checked state transitions and terminal
-result.
+Different providers and model revisions tokenize the same text differently.
+Axiom can enforce byte and attempt bounds everywhere; provider token counts
+remain optional telemetry. Oversized frames and responses fail rather than
+being silently truncated or summarized.
 
-This does **not** mean that two live model calls—or two different models—return
-the same candidate. Axiom makes control, authority, validation, evidence,
-failure, and replay deterministic around that explicitly nondeterministic
-boundary. The VM is a standardized harness generated from the language; it
-does not make a runtime, adapter, durable store, or host sandbox disappear.
+AXIP uses canonical compact JSON and a fixed, content-addressed prologue. An
+adapter that has installed the exact current prologue may advertise its hash
+and receive a reference instead of the inline bytes. In the frozen
+`AXIOM-CONFORMANCE/0.1` fixture, that changes a 1,329-byte inline frame to a
+543-byte referenced frame—a 59.1% transport-byte reduction for that fixture,
+not a universal token-savings benchmark.
 
-## Token efficiency
+Current limitations matter:
 
-Axiom source is for authors, not a prompt copied into every model call. The
-runtime compiles it once and sends a model only the current node-local frame:
-the inference intent, typed input, output schema, active obligation identifiers,
-and referenced context needed at that site.
+- byte limits are per attempt, not one task-wide cost budget;
+- a large explicit argument is sent whole rather than silently pruned;
+- canonical JSON favors interoperability over maximum compression;
+- Core 0.1 has no context store, chunker, or reference-expansion round;
+- its current `contextRefs` list is empty, so `need_context` fails visibly;
+  and
+- live model output remains nondeterministic regardless of frame size.
 
-The protocol is designed around:
+See [`docs/TOKEN-EFFICIENCY.md`](docs/TOKEN-EFFICIENCY.md) for the accounting
+model and reproducible benchmark method.
 
-- UTF-8 byte budgets, which work without knowing a provider's tokenizer;
-- compact schemas and content-addressed context references;
-- a cacheable prologue identified by hash, selected automatically when an
-  adapter advertises that exact cached reference;
-- compact canonical wire keys at the adapter boundary;
-- node-local inputs, so task source and earlier conversation are not sent;
-- schema pruning, so unrelated record definitions consume no model tokens;
-- per-site attempt and output limits.
+## Model portability
 
-Token counts remain useful telemetry, but bytes are the portable enforcement
-unit because providers tokenize differently. See
-[`docs/PROTOCOL.md`](docs/PROTOCOL.md) and
-[`docs/TOKEN-EFFICIENCY.md`](docs/TOKEN-EFFICIENCY.md).
+Axiom semantics do not depend on a vendor, SDK, tokenizer, chat role, native
+tool-calling format, or structured-output feature. The model boundary is:
 
-## Model independence
+```text
+normalized AXIP inference frame -> normalized inference outcome
+```
 
-Language semantics do not depend on a model vendor, prompt template, native
-tool-calling format, or tokenizer. A provider adapter translates a normalized
-Axiom inference frame to a provider request and translates its response back to
-one of three outcomes: `candidate`, `need_context`, or `fail`.
+A conforming adapter returns exactly one of:
 
-“Model-independent” does not mean “all models are equally capable.” It means
-that changing the model cannot alter the program's obligations, available
-ports, tool modes, validators, verifiers, or completion rule. A model that
-cannot produce the declared schema within budget fails that inference; it does
-not get to bypass the type system. See
-[`docs/MODEL-INDEPENDENCE.md`](docs/MODEL-INDEPENDENCE.md).
+- `candidate` — a value that must pass schema checking and validation;
+- `need_context` — a request for declared content references; or
+- `fail` — a structured refusal or inability to produce a candidate.
 
-The library exports `checkAdapterConformance(adapter)`, a bounded AXIP probe
-that checks strict framing, typed output, identity echoing, budgets, and exact
-nonce preservation. It is a compatibility check, not a model-quality
-benchmark. Direct AXIP HTTP endpoints can run it with
-`axiom conform --adapter-url <url>`.
+AXIP/1 defines all three. The Core 0.1 VM currently accepts `candidate` and
+`fail`; because it supplies no context references, `need_context` fails rather
+than triggering undeclared retrieval.
 
-## Files and status
+The minimum model profile is finite text input and finite text output through
+an adapter. Native structured output may improve reliability, but it cannot
+change obligations, authority, budgets, or completion rules. Native tool
+calling is unnecessary because models do not call tools in Axiom.
 
-- [`docs/LANGUAGE.md`](docs/LANGUAGE.md) defines Axiom Core 0.1.
-- [`spec/grammar.ebnf`](spec/grammar.ebnf) gives its concrete grammar.
-- [`docs/PROTOCOL.md`](docs/PROTOCOL.md) defines the model boundary.
-- [`docs/MARKDOWN-IMPORT.md`](docs/MARKDOWN-IMPORT.md) defines lossless,
-  fail-closed Markdown migration.
-- [`docs/DESIGN-SYNTHESIS.md`](docs/DESIGN-SYNTHESIS.md) records what Axiom
-  takes from—and rejects from—Go, Rust, Java, Kotlin, C++, Starlark, CUE, and
-  Rego.
-- [`docs/GUARANTEES.md`](docs/GUARANTEES.md) states the exact determinism
-  boundary.
-- [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md) lists trust assumptions and
-  residual risks.
-- [`docs/DYNAMIC-HARNESSES.md`](docs/DYNAMIC-HARNESSES.md) specifies the
-  bounded, verified task-graph direction.
-- [`docs/LOCKFILES.md`](docs/LOCKFILES.md),
-  [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md), and
-  [`docs/CONFORMANCE.md`](docs/CONFORMANCE.md) cover reproducibility and
-  ecosystem contracts.
-- [`spec/conformance-vectors.json`](spec/conformance-vectors.json) freezes
-  exact cross-runtime canonical data, AIR, AXLOCK, AXLOG, and AXIP outputs.
-- [`docs/LAUNCH.md`](docs/LAUNCH.md) is the research-preview release and
-  claims checklist.
-- [`examples/`](examples) contains a program, input, and deterministic fixtures.
+`checkAdapterConformance(adapter)` and `axiom conform` provide a bounded
+protocol probe for framing, typed output, identity echoing, budgets, and nonce
+preservation. Passing the probe establishes baseline AXIP compatibility—not
+reasoning quality, model determinism, validator soundness, or workload safety.
 
-This is a 0.2 alpha toolchain, not yet a security sandbox or an AGI mechanism.
-External ports are trusted host integrations and must enforce their own
-operating-system, network, secret, approval, and monetary permissions. The
-Markdown importer emits review-required drafts, not automatic semantic
-translations. Content-bound dispositions now bind to the complete formal
-semantics, but the review judgment itself remains a human or trusted-process
-responsibility.
+See [`docs/MODEL-INDEPENDENCE.md`](docs/MODEL-INDEPENDENCE.md).
 
-Scoped unforgeable capabilities, algebraic `Result`/`Option`, exhaustive
-matching, effect regions, content-addressed dependency imports, transactions,
-an independent verifier implementation, and bounded dynamic task graphs remain
-required before a production 1.0 claim. See the threat model and roadmap rather
-than treating “uses Axiom” as a substitute for deployment security.
+## Locks, ledgers, and replay
+
+`AXLOCK/0.1` freezes:
+
+- language, AIR, protocol, and toolchain profiles;
+- semantic and artifact program hashes;
+- exact port signatures and task port sets;
+- static operation, effect, attempt, and write bounds; and
+- an optional fingerprint for the exact trusted binding implementation set.
+
+Lock verification reconstructs and compares the whole object. `run --lock`
+and `frame --lock` reject a mismatch before any tool call or model frame is
+dispatched.
+
+`run --ledger` creates a new append-only, fsynced write-ahead ledger. External
+effect intent is recorded before dispatch and its outcome afterward. An intent
+without an outcome is visibly uncertain. A caught write failure is also marked
+uncertain because a timeout or transport error cannot prove that the remote
+system did not commit.
+
+Ledger entries form a canonical hash chain. Replay validates the chain,
+program, input, run header, each normalized request and response, obligation
+transitions, and the terminal payload. It makes no model, tool, validator, or
+verifier calls.
+
+A hash chain detects mutation relative to a trusted root; it is not by itself
+a signature, MAC, remote timestamp, or transparency log.
+
+## Dynamic harnesses
+
+Core 0.1 is already a language-defined **static** harness: finite,
+source-ordered, typed, locked, verified, and replayable. The host still
+provides a runtime and explicit external bindings.
+
+Model-proposed dynamic task graphs are **planned, not implemented or
+certified**. The proposed safety pipeline is:
+
+```text
+Candidate<TaskGraphProposal>
+  -> validate
+  -> compile to canonical graph IR
+  -> independently verify
+  -> admit through deployment policy
+  -> execute a sealed bounded graph
+```
+
+The design requires finite graphs, typed edges, bounded fan-out and retries,
+capability attenuation, hierarchical budgets, deterministic joins, explicit
+failure paths, proof-flow rules, and replayable scheduling. A model proposal
+would remain data and could never be executed directly.
+
+The goal is not “no harness.” Every agent system has one. The goal is to move
+harness policy into a typed, versioned, auditable language and reduce the
+remaining host to a small runtime plus adapters. See
+[`docs/DYNAMIC-HARNESSES.md`](docs/DYNAMIC-HARNESSES.md).
+
+## Development and verification
+
+The package has no runtime dependencies. The main local checks are:
+
+| Command | Check |
+| --- | --- |
+| `npm run check` | Repository metadata, TypeScript, build, and complete tests |
+| `npm run typecheck` | Type-check without emitting files |
+| `npm run build` | Compile source and tests to `dist/` |
+| `npm test` | Rebuild and run all compiled tests |
+| `npm run test:determinism` | Run the focused determinism suite |
+| `npm run coverage` | Enforce 78% line, 75% branch, and 85% function floors |
+| `npm run package:verify` | Prove two packs are byte-identical, install one, and smoke-test API and CLI |
+| `npm run repo:check` | Validate required artifacts, links, versions, and pinned actions |
+| `npm run vectors:generate` | Print—but never overwrite—the current conformance-vector candidate |
+
+For a larger deterministic property and mutation corpus:
+
+```sh
+AXIOM_PROPERTY_CASES=20000 AXIOM_FUZZ_CASES=25000 npm test
+```
+
+GitHub Actions includes:
+
+- a push and pull-request matrix across Ubuntu, macOS, Windows, Node 24, and
+  Node 26;
+- a scheduled determinism matrix across operating systems, locales, and time
+  zones with the larger property and fuzz corpus;
+- dependency review, CodeQL, and npm audit security checks; and
+- a tag-triggered release-artifact workflow that verifies reproducible
+  archives, smoke-installs the retained archive, checks the tag against
+  `package.json`, attests provenance, and uploads the artifact.
+
+The release workflow does not publish to npm or create a GitHub Release
+automatically.
+
+## Road to 1.0
+
+Implemented in this research preview:
+
+- parser, type checker, canonical compiler, and strict AIR verifier;
+- obligations, nominal propositions, linear evidence, and state invalidation;
+- candidate confinement and declared external ports;
+- AXIP model framing, adapters, byte budgets, attempts, and host deadlines;
+- lockfiles, binding fingerprints, write-ahead ledgers, and replay;
+- lossless, fail-closed Markdown migration;
+- conformance vectors, deterministic property tests, seeded fuzz tests,
+  coverage floors, and CI workflows.
+
+Important work before a production 1.0 claim includes scoped unforgeable
+capabilities, richer `Result`/`Option` and exhaustive matching, effect regions,
+content-addressed dependency imports, transaction semantics, an independent
+verifier implementation, stronger ledger-root anchoring, bounded dynamic task
+graphs, multiple independent implementations, provider qualification, and
+external security review.
+
+The full gates are tracked in [`ROADMAP.md`](ROADMAP.md).
+
+## Documentation map
+
+### Start here
+
+- [`docs/LANGUAGE.md`](docs/LANGUAGE.md) — Core 0.1 language and semantics
+- [`docs/GUARANTEES.md`](docs/GUARANTEES.md) — exact determinism boundary
+- [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — AXIP model protocol
+- [`examples/`](examples) — runnable fixture-backed workflow
+
+### Migration, portability, and efficiency
+
+- [`docs/MARKDOWN-IMPORT.md`](docs/MARKDOWN-IMPORT.md) — lossless,
+  review-required Markdown migration
+- [`docs/MODEL-INDEPENDENCE.md`](docs/MODEL-INDEPENDENCE.md) — adapter and
+  portability contract
+- [`docs/TOKEN-EFFICIENCY.md`](docs/TOKEN-EFFICIENCY.md) — byte budgets,
+  frames, measurements, and benchmark method
+
+### Reproducibility and interoperability
+
+- [`docs/LOCKFILES.md`](docs/LOCKFILES.md) — lockfile contents and admission
+- [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) — versioned compatibility
+  boundaries
+- [`docs/CONFORMANCE.md`](docs/CONFORMANCE.md) — implementation, adapter, and
+  release checks
+- [`spec/conformance-vectors.json`](spec/conformance-vectors.json) — frozen
+  canonical vectors
+- [`spec/semantics.md`](spec/semantics.md) — formal operational semantics
+- [`spec/canonical-json.md`](spec/canonical-json.md) — canonical data rules
+- [`spec/axlock.md`](spec/axlock.md) and [`spec/axlog.md`](spec/axlog.md) —
+  lock and ledger formats
+
+### Design, safety, and release
+
+- [`docs/DESIGN-SYNTHESIS.md`](docs/DESIGN-SYNTHESIS.md) — lessons taken from
+  Go, Rust, Java, Kotlin, C++, Starlark, CUE, and Rego
+- [`docs/DYNAMIC-HARNESSES.md`](docs/DYNAMIC-HARNESSES.md) — planned bounded
+  dynamic task-graph profile
+- [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md) — trust assumptions and
+  residual risks
+- [`docs/LAUNCH.md`](docs/LAUNCH.md) — research-preview release checklist
+
+## Contributing
+
+Axiom changes are spec-first and fail-closed. Language or protocol changes
+must keep the grammar, checker, AIR, strict verifier, runtime, canonical
+encoding, negative tests, replay behavior, and compatibility story aligned.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+Please report security issues privately according to
+[`SECURITY.md`](SECURITY.md). Do not publish exploits, secrets, unsafe binding
+details, or vulnerable production endpoints in a public issue.
+
+## License
+
+Apache License 2.0. See [`LICENSE`](LICENSE).

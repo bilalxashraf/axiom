@@ -109,6 +109,37 @@ if (
   fail("The frozen conformance vector names a different toolchain version");
 }
 
+if (
+  packageJson.repository?.type !== "git" ||
+  !/^git\+https:\/\/github\.com\/[^/]+\/[^/]+\.git$/u.test(
+    packageJson.repository?.url ?? "",
+  )
+) {
+  fail("package.json must declare an HTTPS GitHub repository");
+}
+if (!/^https:\/\/github\.com\/[^/]+\/[^/]+#readme$/u.test(packageJson.homepage)) {
+  fail("package.json must declare a GitHub README homepage");
+}
+if (!/^https:\/\/github\.com\/[^/]+\/[^/]+\/issues$/u.test(packageJson.bugs?.url)) {
+  fail("package.json must declare a GitHub issues URL");
+}
+
+const npmVersion = packageJson.packageManager?.match(/^npm@(.+)$/u)?.[1];
+if (npmVersion === undefined) {
+  fail("package.json must pin npm through packageManager");
+}
+for (const path of workflows) {
+  const source = readFileSync(path, "utf8");
+  if (
+    source.includes("npm ci") &&
+    !source.includes(`npm install --global npm@${npmVersion}`)
+  ) {
+    fail(
+      `${relative(root, path)} installs dependencies without pinning npm ${npmVersion}`,
+    );
+  }
+}
+
 const lockSource = readFileSync(join(root, "src", "lock.ts"), "utf8");
 const versionMatch = lockSource.match(
   /AXIOM_TOOLCHAIN_VERSION\s*=\s*"([^"]+)"/u,
@@ -118,6 +149,7 @@ if (versionMatch?.[1] !== packageJson.version) {
 }
 
 for (const required of [
+  ".github/CODEOWNERS",
   ".github/workflows/ci.yml",
   ".github/workflows/determinism.yml",
   ".github/workflows/release.yml",

@@ -4,6 +4,14 @@
   "description": "A deterministic, proof-carrying execution language for LLM agents",
   "license": "Apache-2.0",
   "author": "Axiom contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bilalxashraf/axiom.git"
+  },
+  "homepage": "https://github.com/bilalxashraf/axiom#readme",
+  "bugs": {
+    "url": "https://github.com/bilalxashraf/axiom/issues"
+  },
   "keywords": [
     "agents",
     "ai",

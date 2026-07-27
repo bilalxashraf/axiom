@@ -3,4 +3,9 @@ dist/
 coverage/
 *.axlog
 *.air
+*.tgz
+.env
+.env.*
+!.env.example
+npm-debug.log*
 .DS_Store
