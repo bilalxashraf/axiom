@@ -3,20 +3,20 @@
 Axiom has several independently versioned boundaries. Treating “the Axiom
 version” as one number hides important incompatibilities.
 
-The current reference package is `@axiom-lang/core` 0.2.0. It accepts source
-language `0.1`, emits and verifies `AIR/0.1`, speaks `AXIP/1`, emits
-`AXLOCK/0.1`, and writes run headers for `AXLOG/0.1`.
+The current reference package is `@axiom-lang/core` 0.3.0. It accepts frozen
+source language 0.1 and the Core 0.2 control profile, emits and verifies their
+paired AIR, lock, and ledger formats, and speaks AXIP/1 for both.
 
 ## 1. Compatibility axes
 
 | Axis | Current identifier | What it governs |
 | --- | --- | --- |
-| Package/API | `@axiom-lang/core` `0.2.0` | TypeScript API, CLI, implementation fixes, distribution |
-| Source language | `axiom 0.1;` | Grammar, typing, operations, obligation semantics |
-| Executable IR | `AIR/0.1` | Exact lowered JSON shapes and executable meaning |
+| Package/API | `@axiom-lang/core` `0.3.0` | TypeScript API, CLI, implementation fixes, distribution |
+| Source language | `axiom 0.1;`, `axiom 0.2;` | Grammar, typing, operations, obligation semantics |
+| Executable IR | `AIR/0.1`, `AIR/0.2` | Exact lowered JSON shapes and executable meaning |
 | Model protocol | `AXIP/1` | AXF1/AXO1 framing, compact schemas, budgets, outcomes |
-| Lock format | `AXLOCK/0.1` | Toolchain, program, capability, bound, and binding pinning |
-| Ledger format | `AXLOG/0.1` | Run provenance and replay transcript meaning |
+| Lock format | `AXLOCK/0.1`, `AXLOCK/0.2` | Toolchain, program, capability, bound, and binding pinning |
+| Ledger format | `AXLOG/0.1`, `AXLOG/0.2` | Run provenance, effects, control trace, and replay meaning |
 | Markdown map | `AXMAP/0.1` | Lossless import coverage and disposition anchors |
 
 Compatibility on one axis does not imply compatibility on another. An adapter
@@ -26,14 +26,21 @@ changing its public TypeScript types.
 
 ## 2. Current behavior is exact-version, not negotiated
 
-The Core 0.1 parser accepts exactly:
+The parser accepts exactly the two explicit source editions:
 
 ```axiom
 axiom 0.1;
+axiom 0.2;
 ```
 
-The strict AIR verifier requires `format: "AIR/0.1"` and
-`language: "0.1"`. Unknown AIR fields are rejected. The AXIP decoder requires
+The strict AIR verifier requires an exact paired format and language:
+
+```text
+0.1 <-> AIR/0.1 <-> AXLOCK/0.1 <-> AXLOG/0.1
+0.2 <-> AIR/0.2 <-> AXLOCK/0.2 <-> AXLOG/0.2
+```
+
+Cross-pairs and unknown AIR fields are rejected. The AXIP decoder requires
 the AXIP/1 magic lines, exact compact object keys, and exact fixed-prologue
 hash. AXLOCK verification reconstructs the current lock and compares the
 entire decoded object. There is no feature negotiation, “compatible mode,”
@@ -58,7 +65,7 @@ seals can change it. The filename is not part of this hash.
 `compiled.hash` is a domain-separated hash:
 
 ```text
-domain = AXIOM-PROGRAM/0.1
+domain = AXIOM-PROGRAM/0.1 or AXIOM-PROGRAM/0.2
 value  = {
   format,
   language,
@@ -101,7 +108,9 @@ and assigns it the same language-level meaning.
 
 For the current prototype:
 
-- only language `0.1` is accepted;
+- language 0.1 remains accepted under its frozen linear rules;
+- language 0.2 adds only exhaustive sequential `if` and bounded sequential
+  `repeat`, under its named rules;
 - there is no published long-term source-compatibility promise;
 - package `0.x` releases may still contain breaking implementation/API changes;
 - Markdown migration declarations are checked provenance and do not enter AIR
@@ -137,6 +146,12 @@ Loaded AIR carries `sourceHash`, but it does not carry the original source or
 AXMAP sidecar. A consumer can verify the artifact and its hash; it cannot
 reconstruct or independently review the original prose from AIR alone.
 
+`AIR/0.2` is a separate closed schema. It adds recursive `if` and `repeat`
+operations, preorder static sites, lexical control scopes, recursive bounds,
+and a separate `AXIOM-PROGRAM/0.2` semantic-hash domain. An AIR/0.1 consumer
+must reject it rather than ignoring control operations. An AIR/0.2 consumer
+must continue to verify AIR/0.1 using the old linear rules.
+
 ## 6. AXIP compatibility
 
 AXIP compatibility asks whether an adapter preserves the same normalized
@@ -158,9 +173,9 @@ therefore preserve AXIP compatibility.
 
 Changing a field's meaning, schema tag, response kind, budget interpretation,
 or prologue semantics requires a new protocol version. An adapter must fail on
-an unknown version rather than treating it as AXIP/1. Core 0.1 currently sends
-no context references and does not implement a `need_context` round even though
-the protocol can represent one.
+an unknown version rather than treating it as AXIP/1. The current source
+profiles send no context references and do not implement a `need_context`
+round even though the protocol can represent one.
 
 ## 7. Replay compatibility
 
@@ -176,6 +191,8 @@ requires:
 - no missing or unused effects;
 - matching raw and normalized model responses;
 - the same obligation-transition transcript; and
+- for AXLOG/0.2, the same full ordered effect/control/obligation transcript,
+  including control-entry iteration vectors;
 - the same terminal kind and canonical terminal payload.
 
 The ledger reader also checks canonical JSON lines, sequence numbers, bounded
@@ -220,8 +237,8 @@ version strings.
 ## 9. Version and edition policy
 
 The following is the compatibility policy for evolving the prototype. It
-describes how future changes should be classified; editions beyond source
-`0.1` are not implemented today.
+describes how changes beyond the implemented source editions 0.1 and 0.2
+should be classified.
 
 ### Package versions
 

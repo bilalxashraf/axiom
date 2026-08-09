@@ -1,6 +1,6 @@
 {
   "name": "@axiom-lang/core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A deterministic, proof-carrying execution language for LLM agents",
   "license": "Apache-2.0",
   "author": "Axiom contributors",
@@ -56,6 +56,7 @@
     "prepack": "npm run clean && npm run check",
     "repo:check": "node scripts/check-repository.mjs",
     "test": "npm run build && node --test dist/test/*.test.js",
+    "test:control-flow": "npm run build && node --test dist/test/control-flow.test.js dist/test/control-flow-vectors.test.js",
     "test:determinism": "npm run build && node --test dist/test/determinism.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "vectors:generate": "npm run build --silent && node scripts/generate-conformance-vectors.mjs"

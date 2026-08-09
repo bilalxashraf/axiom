@@ -23,7 +23,12 @@ import type {
   PropositionMode,
 } from "./ir.ts";
 import { MAX_AXIP_TEXT_SCALARS } from "./limits.ts";
-import { effectsFromLedger, Ledger, type ReplayEffect } from "./ledger.ts";
+import {
+  effectsFromLedger,
+  Ledger,
+  type LedgerWriter,
+  type ReplayEffect,
+} from "./ledger.ts";
 import {
   AXIP_PROLOGUE_HASH,
   createAxipRequest,
@@ -138,6 +143,7 @@ class VirtualMachine {
   readonly bindings: RuntimeBindings | undefined;
   readonly runId: string;
   readonly ledger: Ledger;
+  readonly ledgerWriter: LedgerWriter;
   readonly environment = new Map<string, JsonValue>();
   readonly obligations = new Map<string, ObligationRuntime>();
   readonly evidence = new Map<string, EvidenceRuntime>();
@@ -151,24 +157,36 @@ class VirtualMachine {
   readonly inputHash: string;
   replayCursor = 0;
   worldEpoch = 0;
+  readonly iterationPath: number[] = [];
 
   constructor(compiled: CompiledProgram, options: RunOptions) {
-    this.compiled = compiled;
-    this.program = compiled.program;
-    verifyAirProgram(this.program);
-    const actualHash = semanticProgramHash(this.program);
-    const actualArtifactHash = artifactProgramHash(this.program);
-    const canonicalBytes = canonicalJsonBytes(this.program);
+    const claimedHash = compiled.hash;
+    const claimedArtifactHash = compiled.artifactHash;
+    const claimedBytes = Uint8Array.from(compiled.bytes);
+    const program = immutableJsonSnapshot(
+      compiled.program,
+    ) as unknown as AirProgram;
+    verifyAirProgram(program);
+    const actualHash = semanticProgramHash(program);
+    const actualArtifactHash = artifactProgramHash(program);
+    const canonicalBytes = canonicalJsonBytes(program);
     if (
-      actualHash !== compiled.hash ||
-      actualArtifactHash !== compiled.artifactHash ||
-      Buffer.compare(Buffer.from(canonicalBytes), Buffer.from(compiled.bytes)) !== 0
+      actualHash !== claimedHash ||
+      actualArtifactHash !== claimedArtifactHash ||
+      Buffer.compare(Buffer.from(canonicalBytes), Buffer.from(claimedBytes)) !== 0
     ) {
       throw new RuntimeError(
         "AX2019",
         "CompiledProgram semantic hash, artifact hash, or bytes do not match its canonical AIR program",
       );
     }
+    this.program = program;
+    this.compiled = Object.freeze({
+      hash: claimedHash,
+      artifactHash: claimedArtifactHash,
+      bytes: Uint8Array.from(canonicalBytes),
+      program,
+    });
     const task = this.program.tasks.find((candidate) => candidate.name === options.task);
     if (task === undefined) {
       throw new RuntimeError("AX2001", `Unknown task \`${options.task}\``);
@@ -247,9 +265,12 @@ class VirtualMachine {
       );
     }
     this.ledger = options.ledger ?? new Ledger();
-    this.replaySource = options.replay;
-    this.replayEffects =
-      options.replay === undefined ? [] : effectsFromLedger(options.replay);
+    this.replaySource = options.replay === undefined
+      ? undefined
+      : options.replay.detachedSnapshot();
+    this.replayEffects = this.replaySource === undefined
+      ? []
+      : effectsFromLedger(this.replaySource);
 
     for (const proposition of this.program.propositions) {
       this.propositionModes.set(proposition.name, proposition.mode);
@@ -274,6 +295,14 @@ class VirtualMachine {
       });
     }
     this.validateReplayHeader();
+    try {
+      this.ledgerWriter = this.ledger.acquireExecutionWriter();
+    } catch (error) {
+      throw new RuntimeError(
+        "AX2144",
+        `Cannot acquire an empty exclusive output ledger: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private initializeInputs(input: JsonObject): void {
@@ -306,7 +335,10 @@ class VirtualMachine {
     }
     const header = this.asObject(payload as JsonValue, "Replay run header");
     const currentInputHash = this.inputHash;
+    const expectedLogFormat =
+      this.program.format === "AIR/0.2" ? "AXLOG/0.2" : "AXLOG/0.1";
     if (
+      header.format !== expectedLogFormat ||
       header.program_hash !== this.compiled.hash ||
       header.task !== this.task.name ||
       header.input_hash !== currentInputHash ||
@@ -320,10 +352,18 @@ class VirtualMachine {
   }
 
   async run(): Promise<RunResult> {
-    this.ledger.append(
+    try {
+      return await this.runWithLedgerWriter();
+    } finally {
+      this.ledgerWriter.release();
+    }
+  }
+
+  private async runWithLedgerWriter(): Promise<RunResult> {
+    this.ledgerWriter.append(
       "run",
       jsonValue({
-        format: "AXLOG/0.1",
+        format: this.program.format === "AIR/0.2" ? "AXLOG/0.2" : "AXLOG/0.1",
         run_id: this.runId,
         program_hash: this.compiled.hash,
         artifact_hash: this.compiled.artifactHash,
@@ -351,7 +391,7 @@ class VirtualMachine {
         obligations: this.obligationSnapshot(),
       });
       this.validateReplayTranscript("success", successPayload);
-      this.ledger.append("success", successPayload);
+      this.ledgerWriter.append("success", successPayload);
       return {
         status: "success",
         runId: this.runId,
@@ -381,7 +421,7 @@ class VirtualMachine {
           });
         }
       }
-      this.ledger.append("failure", failurePayload);
+      this.ledgerWriter.append("failure", failurePayload);
       return {
         status: "failed",
         runId: this.runId,
@@ -441,18 +481,28 @@ class VirtualMachine {
       return;
     }
     const sourceTransitions = this.replaySource.entries
-      .filter((entry) => entry.kind === "obligation")
-      .map((entry) => entry.payload);
+      .filter(
+        (entry) =>
+          entry.kind !== "run" &&
+          entry.kind !== "success" &&
+          entry.kind !== "failure",
+      )
+      .map((entry) => ({ kind: entry.kind, payload: entry.payload }));
     const replayTransitions = this.ledger.entries
-      .filter((entry) => entry.kind === "obligation")
-      .map((entry) => entry.payload);
+      .filter(
+        (entry) =>
+          entry.kind !== "run" &&
+          entry.kind !== "success" &&
+          entry.kind !== "failure",
+      )
+      .map((entry) => ({ kind: entry.kind, payload: entry.payload }));
     if (
       canonicalHash(sourceTransitions) !==
       canonicalHash(replayTransitions)
     ) {
       throw new RuntimeError(
         "AX3027",
-        "Replay obligation transition transcript diverged",
+        "Replay semantic transition transcript diverged",
       );
     }
     const sourceTerminal = this.replaySource.entries.at(-1);
@@ -479,29 +529,6 @@ class VirtualMachine {
 
   private async executeOperation(operation: AirOp): Promise<OperationOutcome> {
     switch (operation.op) {
-      case "let":
-        this.bind(
-          operation.destination,
-          evaluateExpression(operation.value, this.environment),
-          this.expressionHasCandidate(operation.value),
-        );
-        return { kind: "continue" };
-      case "must": {
-        if (this.obligations.has(operation.obligation)) {
-          throw new RuntimeError("AX2006", `Duplicate runtime obligation \`${operation.obligation}\``);
-        }
-        const mode = this.propositionModes.get(operation.proposition);
-        if (mode === undefined) {
-          throw new RuntimeError("AX2007", `Unknown proposition \`${operation.proposition}\``);
-        }
-        this.obligations.set(operation.obligation, {
-          proposition: operation.proposition,
-          mode,
-          status: "pending",
-        });
-        this.recordTransition(operation.obligation, "pending");
-        return { kind: "continue" };
-      }
       case "observe": {
         const port = this.requirePort(operation.port, "tool");
         if (port.mode !== "read") {
@@ -754,9 +781,10 @@ class VirtualMachine {
           );
         }
         const args = this.evaluatePortArguments(port, operation.arguments);
+        const nodeId = this.nodeId(operation.site, operation.port);
         const request = jsonValue({
           kind: "verifier",
-          node: this.nodeId(operation.site, operation.port),
+          node: nodeId,
           port: operation.port,
           proposition: operation.proposition,
           world_epoch: this.worldEpoch,
@@ -766,7 +794,7 @@ class VirtualMachine {
           accepted: await this.requireBindings().callVerifier(operation.port, args, {
             runId: this.runId,
             programHash: this.compiled.hash,
-            nodeId: this.nodeId(operation.site, operation.port),
+            nodeId,
             signal,
           }),
         }));
@@ -787,7 +815,9 @@ class VirtualMachine {
           proposition: operation.proposition,
           arguments_hash: canonicalHash(args),
           world_epoch: this.worldEpoch,
-          site: operation.site,
+          ...(this.program.format === "AIR/0.1"
+            ? { site: operation.site }
+            : { node: nodeId }),
         });
         this.evidence.set(operation.destination, {
           id,
@@ -849,11 +879,84 @@ class VirtualMachine {
         if (typeof condition !== "boolean") {
           throw new RuntimeError("AX2114", "if condition must evaluate to Bool");
         }
-        this.ledger.append(
+        this.ledgerWriter.append(
           "branch",
-          jsonValue({ site: operation.site, taken: condition ? "then" : "else" }),
+          jsonValue({
+            site: operation.site,
+            iterations: [...this.iterationPath],
+            taken: condition ? "then" : "else",
+          }),
         );
-        return this.executeOperations(condition ? operation.then : operation.otherwise);
+        const selected = condition ? operation.then : operation.otherwise;
+        const localBindings = this.operationDestinations(selected);
+        try {
+          return await this.executeOperations(selected);
+        } finally {
+          this.clearBindings(localBindings);
+        }
+      }
+      case "repeat": {
+        const localBindings = this.operationDestinations(operation.body);
+        for (
+          let iteration = 1;
+          iteration <= operation.maxIterations;
+          iteration += 1
+        ) {
+          if (iteration > 1) {
+            this.clearBindings(localBindings);
+          }
+          this.iterationPath.push(iteration);
+          let outcome: OperationOutcome;
+          let done: boolean;
+          let iterations: readonly number[];
+          try {
+            iterations = [...this.iterationPath];
+            outcome = await this.executeOperations(operation.body);
+            if (outcome.kind === "complete") {
+              throw new RuntimeError(
+                "AX2141",
+                "A repeat body cannot terminate the task",
+              );
+            }
+            if (this.expressionHasCandidate(operation.until)) {
+              throw new RuntimeError(
+                "AX2142",
+                "Candidate values cannot control repeat termination",
+              );
+            }
+            const condition = evaluateExpression(
+              operation.until,
+              this.environment,
+            );
+            if (typeof condition !== "boolean") {
+              throw new RuntimeError(
+                "AX2143",
+                "repeat until condition must evaluate to Bool",
+              );
+            }
+            done = condition;
+          } finally {
+            this.iterationPath.pop();
+          }
+          this.ledgerWriter.append(
+            "loop",
+            jsonValue({
+              site: operation.site,
+              iteration,
+              iterations,
+              until: done,
+            }),
+          );
+          if (done) {
+            this.clearBindings(localBindings);
+            return { kind: "continue" };
+          }
+        }
+        this.clearBindings(localBindings);
+        throw new RuntimeError(
+          "AX2140",
+          `repeat at site ${operation.site} exhausted its ${operation.maxIterations}-iteration bound`,
+        );
       }
       case "complete": {
         const pending = [...this.obligations.entries()].filter(
@@ -878,7 +981,48 @@ class VirtualMachine {
   }
 
   private nodeId(site: number, port: string): string {
-    return `${this.task.name}:${site}:${port}`;
+    const dynamic =
+      this.iterationPath.length === 0
+        ? ""
+        : `@${this.iterationPath.join(".")}`;
+    return `${this.task.name}:${site}${dynamic}:${port}`;
+  }
+
+  private operationDestinations(operations: readonly AirOp[]): Set<string> {
+    const destinations = new Set<string>();
+    const visit = (operation: AirOp): void => {
+      switch (operation.op) {
+        case "observe":
+        case "infer":
+        case "validate":
+        case "act":
+        case "verify":
+          destinations.add(operation.destination);
+          return;
+        case "if":
+          operation.then.forEach(visit);
+          operation.otherwise.forEach(visit);
+          return;
+        case "repeat":
+          operation.body.forEach(visit);
+          return;
+        case "satisfy":
+        case "assert":
+        case "complete":
+        case "fail":
+          return;
+      }
+    };
+    operations.forEach(visit);
+    return destinations;
+  }
+
+  private clearBindings(bindings: ReadonlySet<string>): void {
+    for (const name of bindings) {
+      this.environment.delete(name);
+      this.candidateBindings.delete(name);
+      this.evidence.delete(name);
+    }
   }
 
   private bind(name: string, value: JsonValue, candidate = false): void {
@@ -1001,7 +1145,7 @@ class VirtualMachine {
     live: (signal: AbortSignal) => Promise<JsonValue | JsonObject>,
     timeoutMs = this.effectTimeoutMs,
   ): Promise<JsonValue> {
-    this.ledger.append("effect_intent", jsonValue({ request }));
+    this.ledgerWriter.append("effect_intent", jsonValue({ request }));
     let recordedOutcome: JsonValue;
     if (this.replaySource !== undefined) {
       const recorded = this.replayEffects[this.replayCursor];
@@ -1030,7 +1174,7 @@ class VirtualMachine {
         });
       }
     }
-    this.ledger.append("effect", jsonValue({ request, response: recordedOutcome }));
+    this.ledgerWriter.append("effect", jsonValue({ request, response: recordedOutcome }));
     const outcome = this.asObject(recordedOutcome, "Recorded effect outcome");
     if (outcome.ok === false) {
       const details = this.asObject(outcome.error as JsonValue, "Recorded effect error");
@@ -1106,7 +1250,7 @@ class VirtualMachine {
   }
 
   private recordTransition(obligation: string, status: string): void {
-    this.ledger.append(
+    this.ledgerWriter.append(
       "obligation",
       jsonValue({
         obligation,
@@ -1125,9 +1269,17 @@ export async function runTask(
     return await new VirtualMachine(compiled, options).run();
   } catch (error) {
     const runId = options.runId ?? "uninitialized";
-    const ledger = options.ledger ?? new Ledger();
+    let ledger = options.ledger ?? new Ledger();
     const details = errorDetails(error);
-    ledger.append("failure", jsonValue(details));
+    try {
+      if (ledger.entries.length !== 0) {
+        throw new Error("Initialization failure cannot be appended to a nonempty output ledger");
+      }
+      ledger.append("failure", jsonValue(details));
+    } catch {
+      ledger = new Ledger();
+      ledger.append("failure", jsonValue(details));
+    }
     return {
       status: "failed",
       runId,

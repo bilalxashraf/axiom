@@ -122,7 +122,7 @@ const COMMAND_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   conform: ["adapter-url", "timeout-ms", "cached-prologue"],
 };
 
-const HELP = `Axiom Core 0.1
+const HELP = `Axiom Core 0.1 + 0.2
 
 Usage:
   axiom import-md <instructions.md> -o <instructions.ax>
@@ -162,9 +162,9 @@ Usage:
 Commands:
   import-md  Create a lossless Axiom migration draft and coverage sidecar.
   check      Parse, type-check, and prove obligation-flow safety.
-  compile    Emit canonical AIR/0.1 JSON.
+  compile    Emit canonical AIR/0.1 or AIR/0.2 JSON.
   lock       Freeze toolchain, AIR, capabilities, bounds, and host bindings.
-  verify-lock  Fail unless a program and binding set exactly match AXLOCK/0.1.
+  verify-lock  Fail unless a program and binding set exactly match its AXLOCK.
   run        Execute with fixture tool bindings and a fixture or HTTP model.
   replay     Re-execute from a ledger without calling models or tools.
   frame      Execute offline and print each compact AXIP model frame.
@@ -469,7 +469,7 @@ async function loadCompiled(
   }
   const value = await readJson(path);
   const program = asObject(value, "AIR file") as unknown as AirProgram;
-  if (program.format !== "AIR/0.1") {
+  if (program.format !== "AIR/0.1" && program.format !== "AIR/0.2") {
     throw new Error(`Unsupported AIR format ${String(program.format)}`);
   }
   verifyAirProgram(program);
@@ -845,8 +845,10 @@ async function main(): Promise<void> {
       const compiled = await loadCompiled(path, mapOption(args));
       const value = await readJson(lockPath);
       verifyProgramLock(value, compiled, await lockBinding(args));
+      const lockFormat =
+        compiled.program.format === "AIR/0.2" ? "AXLOCK/0.2" : "AXLOCK/0.1";
       process.stdout.write(
-        `ok AXLOCK/0.1 ${compiled.hash} (${lockPath})\n`,
+        `ok ${lockFormat} ${compiled.hash} (${lockPath})\n`,
       );
       return;
     }

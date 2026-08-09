@@ -15,6 +15,7 @@ import type {
   FieldDecl,
   InferLimits,
   InferStmt,
+  IfStmt,
   LiteralExpr,
   NamedTypeNode,
   ObligationDecl,
@@ -25,6 +26,7 @@ import type {
   RecordDecl,
   RecordExpr,
   RecordField,
+  RepeatStmt,
   ResolvedDecl,
   ReviewDecl,
   SatisfyStmt,
@@ -73,6 +75,7 @@ export class Parser {
   readonly tokens: readonly Token[];
 
   private index = 0;
+  private languageVersion: "0.1" | "0.2" = "0.1";
 
   constructor(source: string, sourceName = "<source>") {
     this.sourceName = sourceName;
@@ -85,13 +88,14 @@ export class Parser {
       "number",
       "Expected the Axiom language version after `axiom`.",
     );
-    if (versionToken.raw !== "0.1") {
+    if (versionToken.raw !== "0.1" && versionToken.raw !== "0.2") {
       this.error(
         versionToken,
         "A200",
-        `Unsupported Axiom version ${JSON.stringify(versionToken.raw)}; expected 0.1.`,
+        `Unsupported Axiom version ${JSON.stringify(versionToken.raw)}; expected 0.1 or 0.2.`,
       );
     }
+    this.languageVersion = versionToken.raw;
     this.expect(";");
 
     const declarations: Decl[] = [];
@@ -603,6 +607,12 @@ export class Parser {
     if (this.checkWord("assert")) {
       return this.parseAssertStatement();
     }
+    if (this.checkWord("if")) {
+      return this.parseIfStatement();
+    }
+    if (this.checkWord("repeat")) {
+      return this.parseRepeatStatement();
+    }
     if (this.checkWord("complete")) {
       return this.parseCompleteStatement();
     }
@@ -613,7 +623,7 @@ export class Parser {
     this.error(
       this.current(),
       "A214",
-      "Expected observe, infer, validate, act, verify, satisfy, assert, complete, or fail.",
+      "Expected observe, infer, validate, act, verify, satisfy, assert, if, repeat, complete, or fail.",
     );
   }
 
@@ -762,6 +772,53 @@ export class Parser {
       kind: "AssertStmt",
       condition,
       span: this.span(start, end),
+    };
+  }
+
+  private parseIfStatement(): IfStmt {
+    const startToken = this.expectWord("if");
+    if (this.languageVersion !== "0.2") {
+      this.error(
+        startToken,
+        "A242",
+        "`if` requires Axiom Core 0.2; change the header to `axiom 0.2;`.",
+      );
+    }
+    const condition = this.parseExpression();
+    this.expectWord("then");
+    const then = this.parseStatementBlock();
+    this.expectWord("else");
+    const otherwise = this.parseStatementBlock();
+    return {
+      kind: "IfStmt",
+      condition,
+      then,
+      otherwise,
+      span: this.span(startToken.span.start, this.previous().span.end),
+    };
+  }
+
+  private parseRepeatStatement(): RepeatStmt {
+    const startToken = this.expectWord("repeat");
+    if (this.languageVersion !== "0.2") {
+      this.error(
+        startToken,
+        "A243",
+        "`repeat` requires Axiom Core 0.2; change the header to `axiom 0.2;`.",
+      );
+    }
+    this.expectWord("max");
+    const maxIterations = this.parsePositiveInteger();
+    const body = this.parseStatementBlock();
+    this.expectWord("until");
+    const until = this.parseExpression();
+    const end = this.expect(";").span.end;
+    return {
+      kind: "RepeatStmt",
+      maxIterations,
+      body,
+      until,
+      span: this.span(startToken.span.start, end),
     };
   }
 

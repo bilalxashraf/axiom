@@ -26,18 +26,19 @@ captures human intent, or turn a host process into a security sandbox.
 
 | Component | Current version or status |
 | --- | --- |
-| Reference package | `@axiom-lang/core` **0.2.0** |
-| Source language | **Axiom Core 0.1** (`axiom 0.1;`) |
-| Executable IR | `AIR/0.1` |
+| Reference package | `@axiom-lang/core` **0.3.0** |
+| Source language | **Axiom Core 0.1 and 0.2** (`axiom 0.1;` / `axiom 0.2;`) |
+| Executable IR | `AIR/0.1` and `AIR/0.2` |
 | Model protocol | `AXIP/1` |
-| Lock, ledger, and Markdown map | `AXLOCK/0.1`, `AXLOG/0.1`, `AXMAP/0.1` |
+| Lock, ledger, and Markdown map | `AXLOCK/0.1`/`0.2`, `AXLOG/0.1`/`0.2`, `AXMAP/0.1` |
 | Runtime | TypeScript on Node.js 24+ |
 | Maturity | Alpha research preview |
 | License | Apache-2.0 |
 
-The package and language versions are intentionally different. `0.2.0` is the
-version of the TypeScript toolchain; it implements the deliberately small,
-versioned Core 0.1 language and its interoperability formats.
+The package and language versions are intentionally different. `0.3.0` is the
+TypeScript toolchain release. It retains frozen Core 0.1 support and adds the
+separately versioned Core 0.2 control profile and paired interoperability
+formats.
 
 This repository is suitable for evaluation, language design, conformance
 work, deterministic fixtures, and controlled experiments. It is not yet a
@@ -59,6 +60,8 @@ Axiom gives those concerns executable forms:
 | Prompts implicitly grant tool authority | Only declared ports can be called at typed operation sites |
 | Writes may be duplicated | Every `act` has a domain-separated idempotency key |
 | “Done” is a subjective model judgment | Trusted `verifier` evidence is consumed by `satisfy` |
+| Prose conditionals can be skipped or reinterpreted | The VM owns exhaustive typed `if` control |
+| “Repeat until done” can run forever | `repeat max N` is post-test, recorded, and statically bounded |
 | Runs are difficult to reproduce | Canonical AIR, locks, append-only ledgers, and replay |
 | Markdown migration can silently drop prose | Lossless import, explicit span disposition, and a source-wide review seal |
 | Full instruction files consume context repeatedly | Bounded, node-local AXIP frames instead of the full source |
@@ -195,6 +198,36 @@ that candidate into an ordinary `Plan` before the write port can consume it.
 The same program, deterministic input, and fixture bindings are in
 [`examples/`](examples).
 
+Core 0.2 makes control executable without handing it to the model:
+
+```axiom
+axiom 0.2;
+
+extern tool poll() -> Bool mode read;
+extern tool ready_path() -> Unit mode read;
+extern tool fallback_path() -> Unit mode read;
+
+task Wait(prefer_ready: Bool) -> Unit must {} {
+  if prefer_ready then {
+    observe selected = ready_path();
+  } else {
+    observe fallback = fallback_path();
+  }
+
+  repeat max 8 {
+    observe done = poll();
+  } until done;
+
+  complete unit;
+}
+```
+
+Only the selected branch executes. The repeat body runs once before testing,
+uses a fresh local frame on each iteration, and fails with `AX2140` if its
+eighth observed result is still false. Branch and loop locals cannot be used
+after their blocks. A selected `if` branch may end in `fail`; `complete`
+remains a top-level task terminal, and repeats cannot contain either terminal.
+
 ### Core declarations and operations
 
 | Form | Role |
@@ -214,12 +247,16 @@ The same program, deterministic input, and fixture bindings are in
 | `satisfy` | Consumes matching evidence and resolves one obligation |
 | `complete` | Succeeds only when every obligation is currently satisfied |
 | `assert` / `fail` | Terminates unsuccessfully when a condition or task fails |
+| `if ... then ... else ...` | Selects exactly one checked branch from a validated `Bool` |
+| `repeat max N { ... } until ...` | Repeats an effect-bearing block at most `N` times |
 
-Core 0.1 deliberately has no certified branch, loop, recursion, concurrency,
-dynamic evaluation, or dynamic task generation. Every accepted task has a
-finite, source-ordered operation sequence and one explicit terminal operation.
-See [`docs/LANGUAGE.md`](docs/LANGUAGE.md) and the normative
-[`spec/grammar.ebnf`](spec/grammar.ebnf).
+Core 0.1 remains the frozen linear profile. Core 0.2 adds exhaustive
+conditionals and bounded post-test repeats while retaining one source-ordered
+execution and one top-level terminal. It still has no recursion, concurrency,
+dynamic evaluation, unbounded loop, or dynamic task generation. See
+[`docs/LANGUAGE.md`](docs/LANGUAGE.md), the frozen Core 0.1
+[`spec/grammar.ebnf`](spec/grammar.ebnf), and the Core 0.2
+[`spec/grammar-0.2.ebnf`](spec/grammar-0.2.ebnf).
 
 ## Architecture and execution
 
@@ -228,9 +265,9 @@ flowchart LR
     MD["Optional Markdown source"] --> IMP["Lossless import and AXMAP review"]
     IMP --> AX["Axiom .ax source"]
     AX --> CHECK["Parser and type checker"]
-    CHECK --> AIR["Canonical AIR/0.1"]
+    CHECK --> AIR["Canonical AIR/0.1 or AIR/0.2"]
     AIR --> VERIFY["Strict AIR verifier"]
-    LOCK["Optional AXLOCK/0.1"] --> VM["Deterministic VM"]
+    LOCK["Optional paired AXLOCK"] --> VM["Deterministic VM"]
     VERIFY --> VM
     VM --> PORTS["Declared tools, validators, and verifiers"]
     VM --> AXIP["Bounded AXIP/1 frame"]
@@ -238,7 +275,7 @@ flowchart LR
     MODEL --> CANDIDATE["Untrusted Candidate<T>"]
     CANDIDATE --> VM
     PORTS --> VM
-    VM --> LOG["Append-only AXLOG/0.1 ledger"]
+    VM --> LOG["Append-only paired AXLOG ledger"]
     LOG --> REPLAY["Deterministic replay"]
 ```
 
@@ -246,20 +283,22 @@ The execution path is:
 
 1. The checker parses source, checks types and port modes, confines candidate
    values, and proves that completion cannot bypass obligation resolution.
-2. The compiler emits canonical `AIR/0.1` and separate semantic and artifact
-   hashes.
+2. The compiler emits the edition-paired canonical AIR and separate semantic
+   and artifact hashes.
 3. A strict AIR verifier independently re-establishes the runtime safety
    invariants before AIR is admitted.
-4. An optional `AXLOCK/0.1` freezes formats, hashes, exact port signatures,
+4. An optional edition-paired AXLOCK freezes formats, hashes, exact port signatures,
    inferred least-authority port sets, static bounds, and an optional trusted
    binding fingerprint.
-5. The VM evaluates immutable bindings and operations in source order.
+5. The VM evaluates immutable bindings and operations in source order; under
+   Core 0.2 it also owns typed branch selection and bounded repetition.
 6. Every model, tool, validator, and verifier call occurs at a declared effect
    site. Durable execution records intent before dispatch and outcome after.
 7. `complete` succeeds only after each obligation has consumed matching,
    verifier-minted evidence.
 8. Replay substitutes recorded outcomes and checks the same effect requests,
-   obligation transitions, and terminal result without live calls.
+   obligation transitions, Core 0.2 control trace, and terminal result without
+   live calls.
 
 The runtime is a standardized static harness generated from the program. Axiom
 does not eliminate the need for a runtime, model adapter, durable store, or
@@ -269,7 +308,7 @@ host security boundary; it makes their responsibilities explicit and smaller.
 
 Axiom separates four commonly conflated properties:
 
-| Level | Property | Core 0.1 |
+| Level | Property | Core 0.1 / 0.2 |
 | --- | --- | --- |
 | **D1 — Artifact determinism** | Same accepted source, verified sidecars, and pinned toolchain produce byte-identical canonical AIR and hashes | Guaranteed under the documented trust assumptions |
 | **D2 — Control determinism** | Same verified AIR, input, policy, and ordered external outcomes produce the same state transitions and terminal result | Guaranteed under the documented trust assumptions |
@@ -297,7 +336,7 @@ Read the complete conditions in
 
 ## Guarantees and non-guarantees
 
-### Core 0.1 enforces
+### Core 0.1 and 0.2 enforce
 
 - Successful completion requires every declared obligation to be satisfied.
 - Evidence is nominal, proposition-specific, and consumed linearly.
@@ -315,8 +354,12 @@ Read the complete conditions in
 - Locked execution fails before dispatch when the program or trusted binding
   set does not exactly match.
 - Replay rejects missing, extra, reordered, or mismatched external effects.
+- Core 0.2 branch predicates are exact validated Booleans, only one branch
+  executes, and branch decisions are recorded.
+- Core 0.2 repeats run at most 1,024 iterations, have recursive static bounds,
+  use iteration-specific effect identities, and fail closed on exhaustion.
 
-### Core 0.1 does not guarantee
+### Neither profile guarantees
 
 - identical output from independent live model calls;
 - that every model is capable of producing the required candidate;
@@ -346,7 +389,7 @@ After `npm run build`, use `node dist/src/cli.js`; after `npm link`, use
 | --- | --- |
 | `import-md` | Create a lossless migration draft and `AXMAP/0.1` sidecar |
 | `check` | Parse, type-check, and prove obligation-flow safety |
-| `compile` | Emit canonical `AIR/0.1` JSON |
+| `compile` | Emit edition-paired canonical `AIR/0.1` or `AIR/0.2` JSON |
 | `lock` | Freeze program facts, capabilities, bounds, and host bindings |
 | `verify-lock` | Fail unless a program and binding set exactly match a lock |
 | `run` | Execute with fixture-backed tools and a fixture or HTTP model |
@@ -492,8 +535,8 @@ The frame excludes the `.ax` source, Markdown provenance, unrelated task
 bodies and records, comments, chat history, old model prose, and tool receipts
 that are not explicit arguments.
 
-Efficiency is portable because Core 0.1 makes UTF-8 bytes—not provider tokens—
-normative:
+Efficiency is portable because both profiles make UTF-8 bytes—not provider
+tokens—normative:
 
 ```axiom
 infer raw_plan = planner(input)
@@ -517,7 +560,7 @@ Current limitations matter:
 - byte limits are per attempt, not one task-wide cost budget;
 - a large explicit argument is sent whole rather than silently pruned;
 - canonical JSON favors interoperability over maximum compression;
-- Core 0.1 has no context store, chunker, or reference-expansion round;
+- the current profiles have no context store, chunker, or reference-expansion round;
 - its current `contextRefs` list is empty, so `need_context` fails visibly;
   and
 - live model output remains nondeterministic regardless of frame size.
@@ -540,7 +583,7 @@ A conforming adapter returns exactly one of:
 - `need_context` — a request for declared content references; or
 - `fail` — a structured refusal or inability to produce a candidate.
 
-AXIP/1 defines all three. The Core 0.1 VM currently accepts `candidate` and
+AXIP/1 defines all three. The current VM accepts `candidate` and
 `fail`; because it supplies no context references, `need_context` fails rather
 than triggering undeclared retrieval.
 
@@ -558,7 +601,7 @@ See [`docs/MODEL-INDEPENDENCE.md`](docs/MODEL-INDEPENDENCE.md).
 
 ## Locks, ledgers, and replay
 
-`AXLOCK/0.1` freezes:
+The edition-paired `AXLOCK/0.1` or `AXLOCK/0.2` freezes:
 
 - language, AIR, protocol, and toolchain profiles;
 - semantic and artifact program hashes;
@@ -576,19 +619,28 @@ without an outcome is visibly uncertain. A caught write failure is also marked
 uncertain because a timeout or transport error cannot prove that the remote
 system did not commit.
 
+Each execution requires an empty output ledger and holds its exclusive writer
+until the terminal entry is appended. Concurrent caller appends, publication,
+or close attempts are rejected, and no entry may be appended after `success`
+or `failure`. This preserves effect-intent/outcome adjacency across awaited
+host calls.
+
 Ledger entries form a canonical hash chain. Replay validates the chain,
 program, input, run header, each normalized request and response, obligation
-transitions, and the terminal payload. It makes no model, tool, validator, or
-verifier calls.
+transitions, and the terminal payload. AXLOG/0.2 control entries include the
+complete active iteration vector, and replay authenticates the full ordered
+effect/control/obligation transcript. Replay makes no model, tool, validator,
+or verifier calls.
 
 A hash chain detects mutation relative to a trusted root; it is not by itself
 a signature, MAC, remote timestamp, or transparency log.
 
 ## Dynamic harnesses
 
-Core 0.1 is already a language-defined **static** harness: finite,
-source-ordered, typed, locked, verified, and replayable. The host still
-provides a runtime and explicit external bindings.
+Core 0.1 and 0.2 are language-defined **static** harnesses: finite,
+source-ordered, typed, locked, verified, and replayable. Core 0.2 adds
+sequential branch and bounded-repeat control; the host still provides a
+runtime and explicit external bindings.
 
 Model-proposed dynamic task graphs are **planned, not implemented or
 certified**. The proposed safety pipeline is:
@@ -655,6 +707,8 @@ Implemented in this research preview:
 - parser, type checker, canonical compiler, and strict AIR verifier;
 - obligations, nominal propositions, linear evidence, and state invalidation;
 - candidate confinement and declared external ports;
+- exhaustive typed conditionals, bounded effect-bearing repeats, recursive
+  control-flow admission bounds, and replayed control traces;
 - AXIP model framing, adapters, byte budgets, attempts, and host deadlines;
 - lockfiles, binding fingerprints, write-ahead ledgers, and replay;
 - lossless, fail-closed Markdown migration;
@@ -674,7 +728,7 @@ The full gates are tracked in [`ROADMAP.md`](ROADMAP.md).
 
 ### Start here
 
-- [`docs/LANGUAGE.md`](docs/LANGUAGE.md) — Core 0.1 language and semantics
+- [`docs/LANGUAGE.md`](docs/LANGUAGE.md) — Core 0.1 and 0.2 language and semantics
 - [`docs/GUARANTEES.md`](docs/GUARANTEES.md) — exact determinism boundary
 - [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — AXIP model protocol
 - [`examples/`](examples) — runnable fixture-backed workflow

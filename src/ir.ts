@@ -92,18 +92,6 @@ export type InferLimits = {
 
 export type AirOp =
   | {
-      readonly op: "let";
-      readonly site: number;
-      readonly destination: string;
-      readonly value: AirExpr;
-    }
-  | {
-      readonly op: "must";
-      readonly site: number;
-      readonly obligation: string;
-      readonly proposition: string;
-    }
-  | {
       readonly op: "observe";
       readonly site: number;
       readonly destination: string;
@@ -161,6 +149,13 @@ export type AirOp =
       readonly otherwise: readonly AirOp[];
     }
   | {
+      readonly op: "repeat";
+      readonly site: number;
+      readonly maxIterations: number;
+      readonly body: readonly AirOp[];
+      readonly until: AirExpr;
+    }
+  | {
       readonly op: "complete";
       readonly site: number;
       readonly value: AirExpr;
@@ -186,7 +181,7 @@ export type AirTask = {
 };
 
 export type AirProgram = {
-  readonly format: "AIR/0.1";
+  readonly format: "AIR/0.1" | "AIR/0.2";
   readonly language: string;
   readonly sourceHash: string;
   readonly records: readonly AirRecord[];

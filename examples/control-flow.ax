@@ -1,0 +1,28 @@
+axiom 0.2;
+
+record Job {
+  id: Text;
+}
+
+record Status {
+  ready: Bool;
+}
+
+extern tool poll(job: Job) -> Status mode read;
+extern tool notify(job: Job) -> Unit mode write;
+
+task AwaitAndNotify(job: Job) -> Unit
+must {}
+{
+  repeat max 8 {
+    observe status = poll(job);
+  } until status.ready;
+
+  if len(job.id) > 0 then {
+    act notification = notify(job) key hash(job);
+  } else {
+    fail "A job ID is required before notification.";
+  }
+
+  complete unit;
+}

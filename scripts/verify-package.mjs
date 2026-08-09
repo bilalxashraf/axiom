@@ -108,6 +108,7 @@ for (const required of [
   "README.md",
   "SECURITY.md",
   "spec/conformance-vectors.json",
+  "spec/control-flow-vectors.json",
 ]) {
   if (!first.metadata.files.some((file) => file.path === required)) {
     throw new Error(`Required package file is missing: ${required}`);
@@ -144,6 +145,8 @@ try {
         'if (typeof api.compileSource !== "function") throw new Error("missing compileSource");',
         'const compiled = api.compileSource("axiom 0.1; task Main() -> Unit must {} { complete unit; }");',
         'if (!compiled.hash.startsWith("sha256:")) throw new Error("invalid semantic hash");',
+        'const controlled = api.compileSource("axiom 0.2; extern tool poll() -> Bool mode read; task Wait() -> Unit must {} { repeat max 2 { observe done = poll(); } until done; if true then {} else {} complete unit; }");',
+        'if (controlled.program.format !== "AIR/0.2") throw new Error("missing Core 0.2 control flow");',
       ].join(""),
     ],
     temporary,
@@ -158,7 +161,7 @@ try {
     "cli.js",
   );
   const help = run(node, [cli, "help"], temporary);
-  if (!help.includes("Axiom Core 0.1")) {
+  if (!help.includes("Axiom Core 0.1 + 0.2")) {
     throw new Error("Installed CLI smoke test returned unexpected help");
   }
 } finally {

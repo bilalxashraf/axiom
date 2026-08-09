@@ -1,12 +1,12 @@
-# Axiom Core 0.1 threat model
+# Axiom Core 0.1 and 0.2 threat model
 
 ## 1. Status and security posture
 
-This threat model covers the Axiom Core 0.1 compiler, strict AIR verifier, VM,
-AXIP/1 model boundary, Markdown migration artifacts, `AXLOCK/0.1`, and
-`AXLOG/0.1` ledger.
+This threat model covers the Axiom Core 0.1 and 0.2 compiler, strict AIR
+verifier, VM, AXIP/1 model boundary, Markdown migration artifacts, paired
+AXLOCK formats, and paired AXLOG ledgers.
 
-Core 0.1 is a research prototype and execution-control kernel. It is **not yet
+Axiom is a research prototype and execution-control kernel. It is **not yet
 a security sandbox**. Running untrusted bindings in a process with filesystem,
 network, cloud, or credential access is outside the current security
 guarantee.
@@ -86,13 +86,13 @@ This model considers:
 | --- | --- | --- | --- |
 | Markdown migration | Arbitrary prose bytes | Reviewed Axiom declarations | Exact embedded bytes, `AXMAP/0.1`, per-span hashes, unresolved blockers, source-wide seal |
 | Source to compiler | `.ax` text and task input | Typed AST and compiler checks | Strict grammar, types, immutable names, obligation flow |
-| AIR load | Arbitrary JSON-like artifact | Certified Core 0.1 AIR | Exact shapes, canonical domain, type/port/site/evidence checks, semantic and artifact hashes |
+| AIR load | Arbitrary JSON-like artifact | Certified Core 0.1/0.2 AIR | Exact paired format, shapes, types, recursive control/sites/bounds, evidence checks, hashes |
 | Model boundary | Provider and generated text | `Candidate<T>` only | AXIP framing, identities, schemas, byte/attempt limits, candidate confinement |
 | Binding boundary | Host implementation | Typed normalized effects | Port kind, argument/result type, deadlines, recorded intent/outcome |
 | Write boundary | Remote mutable system | Recorded action receipt | Domain-separated idempotency key; host deduplication required |
 | Verifier boundary | External observations and verifier code | `Evidence<P>` | Named verifier, exact proposition, VM-minted identity, linear consumption, world epoch |
-| Ledger storage | Filesystem and operator | Replay transcript | Canonical lines, limits, hash chain, exact effect and terminal replay |
-| Deployment selection | Program, package, bindings | Approved deployment | `AXLOCK/0.1` exact hashes, port signatures, inferred capabilities/bounds, optional binding fingerprint |
+| Ledger storage | Filesystem and operator | Replay transcript | Canonical lines, limits, hash chain, exact effect/control/terminal replay |
+| Deployment selection | Program, package, bindings | Approved deployment | Edition-paired AXLOCK exact hashes, recursive capabilities/bounds, optional binding fingerprint |
 | Release pipeline | Repository and dependencies | Published archive | Lockfile install, tests, determinism stress, package verification, pinned Actions, CodeQL, provenance attestation |
 
 The compiler, strict AIR verifier, VM, canonicalization and hashing code,
@@ -126,7 +126,7 @@ remain in the trusted computing base.
   Unicode scalar strings, cycles, accessors, and unexpected object shapes.
 - AIR has an executable semantic hash and an exact artifact hash.
 - The VM independently verifies AIR and checks both hashes and canonical bytes.
-- `AXLOCK/0.1` freezes toolchain versions, hashes, port signatures, inferred
+- The paired AXLOCK freezes toolchain versions, hashes, port signatures, inferred
   task port sets, static operation/effect/model/write bounds, and an optional
   binding fingerprint.
 
@@ -147,8 +147,23 @@ remain in the trusted computing base.
 - Unmeasurable streaming or multipart bodies fail closed.
 - Model and host effects have finite runtime deadlines.
 - Ledger reads have byte, entry, and line limits.
-- Certified Core 0.1 has no loop, recursion, concurrency, or dynamic
+- Core 0.1 has no loop. Core 0.2 permits only post-test repeats with literal
+  maximum 1..1024, control depth at most 16, and task operation/effect bounds
+  at most 1,000,000. Neither profile has recursion, concurrency, or dynamic
   evaluation.
+
+### 5.6 Deterministic bounded control
+
+- `if` requires an exact `Bool`, has an explicit `else`, evaluates once, and
+  executes only one branch.
+- `repeat` requires an effect-bearing body and a condition that depends on a
+  body-local binding; a raw candidate cannot control either construct.
+- Repeat-local bindings are refreshed per iteration and cannot escape.
+- Dynamic effect identities include the active iteration path, preventing two
+  intended loop writes from sharing one Axiom-derived key.
+- AXLOG/0.2 records branch and loop results with complete iteration vectors;
+  replay authenticates the full ordered effect/control/obligation transcript
+  instead of trusting control entries as executable input.
 
 ## 6. Attack analysis
 
@@ -250,7 +265,8 @@ truncate the log, substitute another program, or fabricate a complete run.
 
 **Current mitigation.** Canonical hash chain, strict entry schema, complete
 terminal structure, header binding, intent/outcome pairing, request matching,
-raw model-response reparsing, transition comparison, and terminal comparison.
+raw model-response reparsing, transition comparison, terminal comparison,
+exclusive execution ownership of an empty output ledger, and terminal sealing.
 
 **Residual risk.** Hash chains provide integrity relative to an authenticated
 root, not authorship. An attacker replacing the whole file can recompute it.
@@ -275,16 +291,20 @@ versioned observations and conditional writes in the domain binding.
 inference, slow adapter, hanging tool, or provider envelope consumes unbounded
 resources or money.
 
-**Current mitigation.** Finite Core task bodies, safe-integer limits,
-per-inference bytes and attempts, adapter transport caps, effect deadlines,
-canonicalization depth limits, CLI input limits, and ledger read limits.
-Static task bounds are exposed in `AXLOCK/0.1`.
+**Current mitigation.** Finite Core task bodies, bounded Core 0.2 repeats,
+safe-integer limits, per-inference bytes and attempts, adapter transport caps,
+effect deadlines, canonicalization depth limits, CLI input limits, and ledger
+read limits. Recursive task bounds are exposed in AXLOCK/0.2.
 
 **Residual risk.** A host callback performing synchronous CPU work can block
 the JavaScript event loop and defeat a timer. A timed-out remote call can
 continue consuming resources. Live ledger writes, overall task wall time,
 total task bytes, memory, and external service quotas are not yet one
 atomically enforced budget vector. Process/container isolation is required.
+An admitted loop can intentionally consume its full static bound, and the
+effect-presence rule does not prove useful real-world progress on every path.
+Deployment policy should select substantially smaller bounds than the profile
+maximum for expensive or destructive ports.
 
 ### 6.10 Capability escalation
 
@@ -377,7 +397,7 @@ files in production” should remain blocked until the following are closed.
 
 Until the blockers above are closed:
 
-1. Run only reviewed `.ax` or AIR artifacts and verify `AXLOCK/0.1` immediately
+1. Run only reviewed `.ax` or AIR artifacts and verify the edition-paired AXLOCK immediately
    before execution.
 2. Use an exact, non-null binding fingerprint.
 3. Put tools, validators, and verifiers in a minimal isolated process or
@@ -398,7 +418,7 @@ Until the blockers above are closed:
 
 ## 9. Security non-goals
 
-Core 0.1 does not attempt to:
+Neither Core 0.1 nor Core 0.2 attempts to:
 
 - sandbox arbitrary JavaScript or native binding code;
 - prove a natural-language requirement equivalent to formal Axiom;

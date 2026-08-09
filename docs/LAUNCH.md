@@ -1,8 +1,9 @@
 # Research-preview launch playbook
 
-Axiom 0.2.0 is ready to launch as a public **research preview** of Core 0.1.
-It is not ready to launch as a production security boundary, a universal AGI
-mechanism, or a promise that stochastic models return identical answers.
+Axiom 0.3.0 is ready to launch as a public **research preview** of frozen Core
+0.1 plus the Core 0.2 bounded-control profile. It is not ready to launch as a
+production security boundary, a universal AGI mechanism, or a promise that
+stochastic models return identical answers.
 
 ## Release position
 
@@ -10,8 +11,8 @@ The defensible launch statement is:
 
 > Axiom replaces operational agent Markdown with a typed, checked execution
 > program. It makes instruction accounting, effect authority, validation,
-> evidence, completion, canonical artifacts, and replay deterministic around
-> explicit model and external-world boundaries.
+> evidence, sequence, bounded control, completion, canonical artifacts, and
+> replay deterministic around explicit model and external-world boundaries.
 
 The launch must not claim:
 
@@ -57,9 +58,11 @@ npm run package:verify
 The expected local result is:
 
 - repository metadata and local links valid;
-- 108 tests passing;
+- the complete checked-in test suite passing, including Core 0.2 control-flow
+  and replay cases;
 - at least 78% lines, 75% branches, and 85% functions;
-- frozen `AXIOM-CONFORMANCE/0.1` vectors unchanged; and
+- frozen `AXIOM-CONFORMANCE/0.1` and
+  `AXIOM-CONTROL-FLOW-CONFORMANCE/0.2` vectors unchanged; and
 - two byte-identical npm archives, followed by an installed API/CLI smoke
   test.
 
@@ -86,10 +89,10 @@ release authority:
 6. It does **not** publish to npm or create a GitHub Release. A maintainer must
    inspect the checks and authorize those external mutations.
 
-For `0.2.0`, the release tag is:
+For `0.3.0`, the release tag is:
 
 ```text
-v0.2.0
+v0.3.0
 ```
 
 Do not tag until the public metadata and protected release environment are
@@ -118,6 +121,12 @@ axiom replay examples/fix.ax \
 Also demonstrate `import-md` stopping at explicit unresolved spans. That is a
 feature: launch material should never imply that guessed semantic conversion
 is safer than visible review.
+
+The Core 0.2 demo should separately show that one `if` branch performs zero
+effects, `repeat` exits on an observed body-local Boolean, the same static
+write site receives different iteration identities, exhaustion fails with
+`AX2140`, and replay rejects a changed `branch` or `loop` entry. Do not market
+the syntactic effect-presence check as proof of useful real-world progress.
 
 ## Post-launch evidence to collect
 

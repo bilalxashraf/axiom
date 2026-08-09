@@ -3,10 +3,11 @@
 ## 1. Scope
 
 This document separates properties Axiom can enforce from properties that
-remain outside the language. It applies to the certified Axiom Core 0.1
+remain outside the language. It applies to the certified Axiom Core 0.1 and
+Core 0.2
 execution path. A guarantee below is conditional on all of the following:
 
-- the source or AIR is accepted by the Core 0.1 checker and strict AIR
+- the source or AIR is accepted by the edition-matched checker and strict AIR
   verifier;
 - the compiler, verifier, VM, canonical serializer, and cryptographic
   primitives execute as specified;
@@ -30,7 +31,7 @@ names them separately so a claim about one cannot be mistaken for another.
 The levels are cumulative for a recorded execution, but Level 4 is an
 environmental property rather than a Core guarantee.
 
-| Level | Property | Same inputs mean | Core 0.1 status |
+| Level | Property | Same inputs mean | Core 0.1 / 0.2 status |
 | --- | --- | --- | --- |
 | **D1 — Artifact determinism** | Parsing, checking, lowering, canonical serialization, and hashing | The same accepted source bytes, migration sidecars, and pinned toolchain produce byte-identical canonical AIR and hashes | **Guaranteed under the stated assumptions** |
 | **D2 — Control determinism** | Evaluation and state-machine behavior | The same verified AIR, task input, runtime policy, and ordered external outcomes produce the same bindings, obligation transitions, effect requests, and terminal result | **Guaranteed under the stated assumptions** |
@@ -51,7 +52,8 @@ For a pinned conforming toolchain `T`:
 compile_T(source_bytes, verified_sidecars) = AIR_bytes
 ```
 
-repeated compilation produces the same canonical `AIR/0.1` bytes. Axiom's
+repeated compilation produces the same canonical edition-paired AIR bytes.
+Axiom's
 canonical JSON domain:
 
 - accepts only Unicode scalar-value strings and performs no implicit Unicode
@@ -76,7 +78,8 @@ the exact artifact.
 
 D1 does not mean that an unpinned future compiler version must emit the same
 AIR. Language, AIR, protocol, compiler, and dependency versions must be
-explicit compatibility inputs. `AXLOCK/0.1` records these versions, both
+explicit compatibility inputs. The paired `AXLOCK/0.1` or `AXLOCK/0.2`
+records these versions, both
 program hashes, every port signature, each task's inferred port set and static
 bounds, and an optional exact host-binding fingerprint. Lock verification is
 whole-object and fail-closed.
@@ -84,7 +87,7 @@ whole-object and fail-closed.
 ### 2.2 D2 — Control determinism
 
 Let `E` be the ordered sequence of normalized external outcomes supplied at
-declared effect sites. For accepted Core 0.1 AIR:
+declared effect sites. For accepted Core 0.1 or Core 0.2 AIR:
 
 ```text
 execute(AIR, task, input, policy, E) = one Axiom transition transcript
@@ -104,16 +107,26 @@ The VM defines:
 - stable, domain-separated write idempotency keys; and
 - success only at `complete` after all obligations are currently satisfied.
 
-The external outcomes in `E` may be nondeterministic. D2 says the runtime's
-reaction to them is not. A model answer cannot change which operation executes
-next in certified Core 0.1, add a port, mint evidence, or reinterpret task
-source.
+For Core 0.2, the VM additionally defines exact-Boolean branch selection,
+mandatory `else`, post-test repeat ordering, a 1..1024 literal iteration
+bound, fresh loop-local frames, recursive static resource bounds, and an
+iteration path in dynamic effect identity. `AXLOG/0.2` records branch and loop
+decisions with the complete active iteration vector for replay comparison. A
+selected `if` branch may end in `fail`; `complete` remains top-level and all
+repeat bodies forbid `fail`, `complete`, `verify`, and `satisfy`.
 
-Core 0.1 has no certified loop, recursion, concurrency, dynamic evaluation, or
-dynamic task generation. Every accepted task has a finite operation sequence
-and one final `complete` or `fail`. Each `infer` site has positive byte and
-attempt bounds. Live external invocations also have host deadlines, although a
-deadline cannot undo an external side effect that already happened.
+The external outcomes in `E` may be nondeterministic. D2 says the runtime's
+reaction to them is not. In Core 0.1 no model answer can change the next
+operation. In Core 0.2 only a validated ordinary `Bool` can select an admitted
+branch or loop exit; a raw candidate cannot. A model cannot add a port, widen a
+bound, mint evidence, or reinterpret task source.
+
+Core 0.1 has no certified loop. Core 0.2 repeats are finite and statically
+bounded. Neither profile has recursion, concurrency, dynamic evaluation, or
+dynamic task generation. Every accepted task has one final top-level
+`complete` or `fail`. Each `infer` site has positive byte and attempt bounds.
+Live external invocations also have host deadlines, although a deadline cannot
+undo an external side effect that already happened.
 
 ### 2.3 D3 — Replay determinism
 
@@ -134,6 +147,12 @@ append, and record an outcome afterward. A crash between intent and outcome is
 therefore visible as an uncertain effect rather than rewritten as “nothing
 happened.”
 
+The VM accepts only an empty output ledger and holds an exclusive append lease
+for the execution. Other append, publish, and close attempts fail while that
+lease is active. A `success` or `failure` entry seals the ledger against later
+appends. These rules prevent a caller from inserting an entry between an
+awaited effect's intent and outcome.
+
 Every caught write failure is also conservatively recorded with
 `uncertain: true`: a timeout or transport error cannot prove that a remote
 write did not commit. Reads and other non-write failures record
@@ -147,14 +166,16 @@ Replay:
 4. reparses recorded raw model output and checks it against its normalized
    envelope;
 5. rejects missing, extra, reordered, or mismatched effects; and
-6. compares obligation transitions and the terminal payload.
+6. for AXLOG/0.2, authenticates the full ordered
+   effect/control/obligation transcript, including iteration vectors; and
+7. compares obligation transitions and the terminal payload.
 
 No model, tool, validator, or verifier is called during replay. This gives an
 exact deterministic account of what Axiom did with the recorded outcomes.
 
 A ledger hash chain provides tamper evidence only when its root is anchored
 outside the attacker's control. An attacker able to replace an entire ledger
-can recompute an internally valid chain. Core 0.1 does not yet sign, encrypt,
+can recompute an internally valid chain. The current profiles do not sign, encrypt,
 remotely timestamp, or transparency-log ledger roots.
 
 ### 2.4 D4 — Live-world reproducibility
@@ -182,7 +203,7 @@ as snapshots, versioned reads, conditional writes, transactions, or consensus.
 
 ## 3. The successful-completion guarantee
 
-For an accepted Core 0.1 program:
+For an accepted Core 0.1 or Core 0.2 program:
 
 ```text
 Run(program, task, input) = Complete(value)
@@ -331,7 +352,7 @@ normalized AXIP request -> normalized AXIP outcome
 ```
 
 The outcome is a candidate, a declared context request, or a structured
-failure. Core 0.1 currently enables candidates and failures and rejects context
+failure. The current profiles enable candidates and failures and reject context
 requests explicitly.
 
 Changing a model or adapter cannot change:
@@ -382,7 +403,7 @@ not guarantee a fixed token count, cost, or latency across model families.
 
 ## 8. Explicit non-guarantees
 
-Core 0.1 does not guarantee:
+Neither Core 0.1 nor Core 0.2 guarantees:
 
 - that every human intention was declared as an obligation;
 - that contradictory, impossible, underspecified, or subjective requirements
@@ -403,7 +424,7 @@ Core 0.1 does not guarantee:
 - that a package hash proves source provenance or freedom from supply-chain
   compromise;
 - that Markdown migration proves semantic equivalence;
-- that Core 0.1 is a security sandbox; or
+- that either profile is a security sandbox; or
 - that the language alone constitutes AGI.
 
 ## 9. Claim checklist
@@ -421,7 +442,7 @@ applicable claim from this table and no stronger one.
 | “Axiom makes any model deterministic.” | No | Impossible at the language boundary |
 | “Axiom guarantees the task is correct because it completed.” | No | Requires correct specifications and trusted verifiers |
 | “No harness is needed.” | No | The Axiom runtime is the standardized harness |
-| “Axiom is currently safe for arbitrary untrusted plugins.” | No | Core 0.1 is not an OS or service sandbox |
+| “Axiom is currently safe for arbitrary untrusted plugins.” | No | Axiom is not an OS or service sandbox |
 
 The honest launch promise is:
 

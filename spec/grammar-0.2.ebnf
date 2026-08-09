@@ -1,0 +1,221 @@
+(* Axiom Core 0.2 concrete grammar.
+
+   Core 0.2 preserves every Core 0.1 declaration, expression, and linear
+   operation and adds exhaustive `if` and bounded post-test `repeat`.
+
+   Notation:
+   { X }  zero or more X
+   [ X ]  optional X
+   (X|Y)  choice
+
+   Whitespace and comments may occur between tokens. A line comment begins
+   with "//" or "#". A block comment is delimited by "/*" and "*/".
+*)
+
+program             = "axiom", version, ";", { declaration }, EOF ;
+version             = "0.2" ;
+
+declaration         = record-declaration
+                    | source-declaration
+                    | unresolved-declaration
+                    | resolved-declaration
+                    | review-declaration
+                    | proposition-declaration
+                    | extern-declaration
+                    | task-declaration ;
+
+source-declaration  = "source", identifier,
+                      "path", string,
+                      "hash", string,
+                      "bytes", nonnegative-integer,
+                      "base64", string,
+                      "map", string, ";" ;
+
+unresolved-declaration
+                    = "unresolved", identifier,
+                      "source", identifier,
+                      "bytes", nonnegative-integer, nonnegative-integer,
+                      "hash", string,
+                      "category", string,
+                      "reason", string, ";" ;
+
+resolved-declaration
+                    = "resolved", identifier,
+                      "source", identifier,
+                      "bytes", nonnegative-integer, nonnegative-integer,
+                      "hash", string,
+                      "as",
+                      ( "requirement",
+                        "task", identifier,
+                        "obligation", identifier,
+                        "reason", string
+                      | "non_normative",
+                        "reason", string ),
+                      ";" ;
+
+review-declaration  = "review", identifier,
+                      "source_hash", string,
+                      "dispositions_hash", string, ";" ;
+
+record-declaration  = "record", identifier, "{", { field-declaration }, "}",
+                      [ ";" ] ;
+field-declaration   = identifier, ":", type, ( ";" | "," ) ;
+
+proposition-declaration
+                    = "proposition", identifier,
+                      ( "event" | "state" ), ";" ;
+
+extern-declaration  = tool-declaration
+                    | model-declaration
+                    | validator-declaration
+                    | verifier-declaration ;
+
+tool-declaration    = "extern", "tool", identifier, parameters, "->", type,
+                      "mode", ( "read" | "write" ), ";" ;
+
+model-declaration   = "extern", "model", identifier, parameters, "->", type,
+                      "intent", string, ";" ;
+(* A model intent contains 1..1024 Unicode scalar values. *)
+
+validator-declaration
+                    = "extern", "validator", identifier, parameters, "->",
+                      type, ";" ;
+
+verifier-declaration
+                    = "extern", "verifier", identifier, parameters, "proves",
+                      identifier, ";" ;
+
+parameters          = "(", [ parameter-list ], ")" ;
+parameter-list      = parameter, { ",", parameter } ;
+parameter           = identifier, ":", type ;
+
+type                = primary-type, { "[]" } ;
+primary-type        = qualified-name, [ "<", type-list, ">" ] ;
+type-list           = type, { ",", type } ;
+
+task-declaration    = "task", identifier, parameters, "->", type,
+                      "must", "{", { obligation }, "}", block ;
+
+obligation          = identifier, ":", identifier, ";" ;
+block               = "{", { statement }, "}" ;
+
+statement           = observe-statement
+                    | infer-statement
+                    | validate-statement
+                    | act-statement
+                    | verify-statement
+                    | satisfy-statement
+                    | assert-statement
+                    | if-statement
+                    | repeat-statement
+                    | complete-statement
+                    | fail-statement ;
+
+observe-statement   = "observe", identifier, "=", call-expression, ";" ;
+
+infer-statement     = "infer", identifier, "=", call-expression,
+                      "limit", infer-limit, infer-limit, infer-limit, ";" ;
+infer-limit         = "input_bytes", positive-integer
+                    | "output_bytes", positive-integer
+                    | "attempts", positive-integer ;
+(* Each infer-limit name occurs exactly once. Core 0.2 statically limits
+   attempts to 1..16. *)
+
+validate-statement  = "validate", identifier, "=", call-expression, ";" ;
+
+act-statement       = "act", identifier, "=", call-expression,
+                      "key", expression, ";" ;
+
+verify-statement    = "verify", identifier, "=", call-expression, ";" ;
+
+satisfy-statement   = "satisfy", identifier, "with", expression, ";" ;
+assert-statement    = "assert", expression, ";" ;
+
+if-statement        = "if", expression, "then", block, "else", block ;
+
+repeat-statement    = "repeat", "max", positive-integer, block,
+                      "until", expression, ";" ;
+(* repeat max is statically restricted to 1..1024. Additional certified
+   restrictions on the body and condition are in semantics-0.2.md. *)
+
+complete-statement  = "complete", expression, ";" ;
+fail-statement      = "fail", expression, ";" ;
+
+expression          = logical-or ;
+logical-or          = logical-and, { "||", logical-and } ;
+logical-and         = equality, { "&&", equality } ;
+equality            = comparison, { ( "==" | "!=" ), comparison } ;
+comparison          = additive,
+                      { ( "<" | "<=" | ">" | ">=" ), additive } ;
+additive            = multiplicative, { ( "+" | "-" ), multiplicative } ;
+multiplicative      = unary, { ( "*" | "/" | "%" ), unary } ;
+unary               = [ "!" | "+" | "-" ], postfix ;
+postfix             = primary,
+                      { ".", identifier | "(", [ arguments ], ")" } ;
+
+call-expression     = identifier, "(", [ arguments ], ")" ;
+arguments           = expression, { ",", expression } ;
+
+primary             = literal
+                    | array
+                    | record-value
+                    | qualified-name
+                    | "(", expression, ")" ;
+
+array               = "[", [ arguments ], "]" ;
+record-value        = [ qualified-name ], "{", [ record-field-list ], "}" ;
+record-field-list   = record-field,
+                      { ( "," | ";" ), record-field },
+                      [ "," | ";" ] ;
+record-field        = identifier, [ ":", expression ] ;
+
+literal             = string
+                    | number
+                    | "true"
+                    | "false"
+                    | "unit"
+                    | "null" ;
+
+qualified-name      = identifier, { ".", identifier } ;
+identifier          = identifier-start, { identifier-continue } ;
+identifier-start    = "_" | ASCII-letter ;
+identifier-continue = identifier-start | ASCII-digit ;
+(* An identifier contains at most 256 ASCII characters. *)
+
+positive-integer    = nonzero-digit, { ASCII-digit } ;
+nonnegative-integer = "0" | positive-integer ;
+(* Decimal fractions and exponent spellings are deliberately absent. Values
+   must also fit Axiom's checked safe-integer range. *)
+number              = [ "-" ], integer ;
+integer             = "0" | positive-integer ;
+
+string              = double-quoted-string | single-quoted-string ;
+double-quoted-string
+                    = '"', { double-string-character | escape }, '"' ;
+single-quoted-string
+                    = "'", { single-string-character | escape }, "'" ;
+escape              = "\", ( '"' | "'" | "\" | "/" | "b" | "f" | "n"
+                              | "r" | "t" | unicode-escape ) ;
+unicode-escape      = "u", hex-digit, hex-digit, hex-digit, hex-digit ;
+(* Escape sequences that would produce an unpaired UTF-16 surrogate are
+   rejected; decoded strings are Unicode scalar sequences. *)
+
+ASCII-letter        = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H"
+                    | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P"
+                    | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X"
+                    | "Y" | "Z"
+                    | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h"
+                    | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p"
+                    | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x"
+                    | "y" | "z" ;
+ASCII-digit         = "0" | nonzero-digit ;
+nonzero-digit       = "1" | "2" | "3" | "4" | "5"
+                    | "6" | "7" | "8" | "9" ;
+hex-digit           = ASCII-digit | "a" | "b" | "c" | "d" | "e" | "f"
+                    | "A" | "B" | "C" | "D" | "E" | "F" ;
+
+EOF                 = ? end of input ? ;
+double-string-character
+                    = ? any Unicode scalar except '"', "\", CR, or LF ? ;
+single-string-character
+                    = ? any Unicode scalar except "'", "\", CR, or LF ? ;

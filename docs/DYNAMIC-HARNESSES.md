@@ -12,24 +12,26 @@ Axiom's credible goal is therefore:
 > Move harness policy into a typed, versioned, verifiable language and reduce
 > the remaining host to a small runtime plus explicit adapters.
 
-Core 0.1 standardizes a static harness. This document sketches a future,
-strictly bounded dynamic harness extension. Nothing marked **Planned** is part
-of certified Core 0.1, and the syntax and AIR format are not yet normative.
+Core 0.1 standardizes a linear static harness; Core 0.2 adds sequential,
+source-authored, bounded control to that static harness. This document sketches
+a future runtime-generated graph extension. Nothing marked **Planned** is part
+of certified Core 0.1 or 0.2, and the graph syntax and GAIR format are not yet
+normative.
 
 ## 2. Current foundation versus planned extension
 
-| Area | Current — certified Core 0.1 | Planned — dynamic harness profile |
+| Area | Current — certified Core 0.1 / 0.2 | Planned — dynamic harness profile |
 | --- | --- | --- |
-| Workflow shape | Finite source-ordered task body | Finite verified task DAG instantiated at runtime |
+| Workflow shape | Finite source-ordered task body; Core 0.2 has recursive static bounds | Finite verified task DAG instantiated at runtime |
 | Model authority | Produces opaque `Candidate<T>` | May propose `Candidate<TaskGraphProposal>`, never executable code directly |
 | Candidate approval | Declared trusted validator | Graph-specific validation plus compilation, independent verification, and deployment policy |
-| Control flow | No certified branch, loop, recursion, concurrency, or dynamic task generation | Bounded tagged branches, deterministic joins, finite fan-out, no unrestricted recursion |
-| Capabilities | Closed declared port set; inferred task port set recorded in AXLOCK | Unforgeable scoped capabilities with monotonic parent-to-child attenuation |
-| Budgets | Per-inference byte/attempt limits, host deadlines, static task bounds | Hierarchical budget vectors reserved and consumed by graph, child, retry, and supervisor |
+| Control flow | Core 0.2 exhaustive sequential `if` and post-test `repeat max N`; no recursion, concurrency, or dynamic task generation | Runtime-proposed tagged branches, deterministic joins, finite fan-out, no unrestricted recursion |
+| Capabilities | Closed declared port set; recursive task port set recorded in paired AXLOCK | Unforgeable scoped capabilities with monotonic parent-to-child attenuation |
+| Budgets | Per-inference byte/attempt limits, host deadlines, recursive static task bounds | Hierarchical budget vectors reserved and consumed by graph, child, retry, and supervisor |
 | Failure | Explicit task failure; no automatic supervisor | Typed failure channels and bounded declared supervision policies |
 | Parallelism | None | Stable lanes, canonical result ordering, restricted write concurrency |
 | Proof | Task obligations and linear verifier evidence | Scoped child obligations, proof promotion, join proof rules, graph-level postconditions |
-| Audit | Effect and obligation ledger with replay | Proposal, validation, graph hash, policy decision, schedule, supervision, and child ledgers |
+| Audit | AXLOG/0.2 authenticates the full ordered effect/control/obligation transcript | Proposal, validation, graph hash, policy decision, schedule, supervision, and child ledgers |
 
 Keeping these profiles separate matters. A dynamic feature should enter the
 certified core only after its termination, authority, proof-flow, and replay
@@ -300,8 +302,8 @@ binding worker. The worker must not receive a process-global credential that
 can access resources outside the handle. Service credentials should be minted
 or scoped per capability wherever the external platform supports it.
 
-This is a planned production requirement. Current Core 0.1 records a closed
-port set but does not provide OS-level or service-level isolation.
+This is a planned production requirement. The current Core profiles record a
+closed port set but do not provide OS-level or service-level isolation.
 
 ## 5. Hierarchical deterministic budgets
 

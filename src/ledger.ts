@@ -34,6 +34,11 @@ export type LedgerEntry = {
   readonly hash: string;
 };
 
+export interface LedgerWriter {
+  append(kind: string, payload: JsonValue): LedgerEntry;
+  release(): void;
+}
+
 type UnsignedLedgerEntry = Omit<LedgerEntry, "hash">;
 
 function sha256(value: string): string {
@@ -49,6 +54,7 @@ export class Ledger {
       }
     | undefined;
   #closed = false;
+  #writerToken: symbol | undefined;
 
   constructor(
     journal?: {
@@ -80,9 +86,65 @@ export class Ledger {
     return this.#entries.at(-1)?.hash ?? "sha256:genesis";
   }
 
+  /** Return a journal-free, append-array-detached view of the current chain. */
+  detachedSnapshot(): Ledger {
+    const snapshot = new Ledger();
+    snapshot.#entries.push(...this.#entries);
+    return snapshot;
+  }
+
   append(kind: string, payload: JsonValue): LedgerEntry {
+    if (this.#writerToken !== undefined) {
+      throw new Error("Cannot append while an execution owns the ledger writer");
+    }
+    return this.#append(kind, payload);
+  }
+
+  /**
+   * Give one execution exclusive append authority over a new output ledger.
+   * The lease prevents callers from splitting write-ahead effect pairs while
+   * an external operation is awaiting its outcome.
+   */
+  acquireExecutionWriter(): LedgerWriter {
+    if (this.#closed) {
+      throw new Error("Cannot acquire a writer for a closed ledger");
+    }
+    if (this.#writerToken !== undefined) {
+      throw new Error("The ledger already has an active execution writer");
+    }
+    if (this.#entries.length !== 0) {
+      throw new Error("An execution output ledger must be empty");
+    }
+    const token = Symbol("axiom-ledger-writer");
+    this.#writerToken = token;
+    let released = false;
+    return Object.freeze({
+      append: (kind: string, payload: JsonValue): LedgerEntry => {
+        if (released || this.#writerToken !== token) {
+          throw new Error("The execution ledger writer has been released");
+        }
+        return this.#append(kind, payload);
+      },
+      release: (): void => {
+        if (released) {
+          return;
+        }
+        if (this.#writerToken !== token) {
+          throw new Error("The execution ledger writer lease is invalid");
+        }
+        this.#writerToken = undefined;
+        released = true;
+      },
+    });
+  }
+
+  #append(kind: string, payload: JsonValue): LedgerEntry {
     if (this.#closed) {
       throw new Error("Cannot append to a closed ledger");
+    }
+    const terminal = this.#entries.at(-1)?.kind;
+    if (terminal === "success" || terminal === "failure") {
+      throw new Error("Cannot append after a terminal ledger entry");
     }
     let kindLength: number;
     try {
@@ -129,6 +191,9 @@ export class Ledger {
   }
 
   async write(path: string): Promise<void> {
+    if (this.#writerToken !== undefined) {
+      throw new Error("Cannot publish a ledger while an execution writer is active");
+    }
     if (this.#journal !== undefined) {
       throw new Error(
         `Ledger is already durably journaled at ${JSON.stringify(this.#journal.path)}`,
@@ -142,6 +207,9 @@ export class Ledger {
   }
 
   close(): void {
+    if (this.#writerToken !== undefined) {
+      throw new Error("Cannot close a ledger while an execution writer is active");
+    }
     if (this.#closed) {
       return;
     }
@@ -328,6 +396,25 @@ export function effectsFromLedger(ledger: Ledger): ReplayEffect[] {
       "Replay ledger must end with exactly one success or failure entry",
     );
   }
+  const runPayload = entries[0]?.payload;
+  const declaredFormat =
+    runPayload !== null &&
+    runPayload !== undefined &&
+    !Array.isArray(runPayload) &&
+    typeof runPayload === "object" &&
+    "format" in runPayload
+      ? runPayload.format
+      : undefined;
+  if (
+    declaredFormat !== undefined &&
+    declaredFormat !== "AXLOG/0.1" &&
+    declaredFormat !== "AXLOG/0.2"
+  ) {
+    throw new ReplayError(
+      "AX3029",
+      `Unsupported replay ledger format ${JSON.stringify(declaredFormat)}`,
+    );
+  }
   const allowedKinds = new Set([
     "run",
     "effect_intent",
@@ -336,6 +423,10 @@ export function effectsFromLedger(ledger: Ledger): ReplayEffect[] {
     "success",
     "failure",
   ]);
+  if (declaredFormat === "AXLOG/0.2") {
+    allowedKinds.add("branch");
+    allowedKinds.add("loop");
+  }
   for (const [index, entry] of entries.entries()) {
     if (!allowedKinds.has(entry.kind)) {
       throw new ReplayError(
@@ -346,10 +437,22 @@ export function effectsFromLedger(ledger: Ledger): ReplayEffect[] {
     if (entry.kind === "run" && index !== 0) {
       throw new ReplayError("AX3026", "Replay ledger contains more than one run entry");
     }
+    if (entry.kind === "branch") {
+      validateBranchEntry(entry.payload, index);
+    }
+    if (entry.kind === "loop") {
+      validateLoopEntry(entry.payload, index);
+    }
   }
   const effects: ReplayEffect[] = [];
   let intent: JsonValue | undefined;
   for (const entry of entries) {
+    if (intent !== undefined && entry.kind !== "effect") {
+      throw new ReplayError(
+        "AX3020",
+        "An effect outcome must immediately follow its effect intent",
+      );
+    }
     if (entry.kind === "effect_intent") {
       const payload = entry.payload;
       if (
@@ -405,4 +508,79 @@ export function effectsFromLedger(ledger: Ledger): ReplayEffect[] {
     );
   }
   return effects;
+}
+
+function controlObject(
+  payload: JsonValue,
+  index: number,
+  expectedKeys: readonly string[],
+): Readonly<Record<string, JsonValue>> {
+  if (payload === null || Array.isArray(payload) || typeof payload !== "object") {
+    throw new ReplayError(
+      "AX3030",
+      `Control entry at sequence ${index} must have an object payload`,
+    );
+  }
+  const keys = Object.keys(payload).sort();
+  const expected = [...expectedKeys].sort();
+  if (
+    keys.length !== expected.length ||
+    keys.some((key, keyIndex) => key !== expected[keyIndex])
+  ) {
+    throw new ReplayError(
+      "AX3030",
+      `Control entry at sequence ${index} has missing or unexpected fields`,
+    );
+  }
+  return payload as Readonly<Record<string, JsonValue>>;
+}
+
+function validateBranchEntry(payload: JsonValue, index: number): void {
+  const object = controlObject(payload, index, ["site", "iterations", "taken"]);
+  if (
+    typeof object.site !== "number" ||
+    !Number.isSafeInteger(object.site) ||
+    object.site < 0 ||
+    (object.taken !== "then" && object.taken !== "else") ||
+    !validIterationPath(object.iterations)
+  ) {
+    throw new ReplayError(
+      "AX3030",
+      `Branch entry at sequence ${index} has invalid values`,
+    );
+  }
+}
+
+function validateLoopEntry(payload: JsonValue, index: number): void {
+  const object = controlObject(payload, index, [
+    "site",
+    "iteration",
+    "iterations",
+    "until",
+  ]);
+  if (
+    typeof object.site !== "number" ||
+    !Number.isSafeInteger(object.site) ||
+    object.site < 0 ||
+    typeof object.iteration !== "number" ||
+    !Number.isSafeInteger(object.iteration) ||
+    object.iteration < 1 ||
+    typeof object.until !== "boolean" ||
+    !validIterationPath(object.iterations) ||
+    object.iterations.at(-1) !== object.iteration
+  ) {
+    throw new ReplayError(
+      "AX3030",
+      `Loop entry at sequence ${index} has invalid values`,
+    );
+  }
+}
+
+function validIterationPath(value: unknown): value is readonly number[] {
+  return Array.isArray(value) && value.every(
+    (iteration) =>
+      typeof iteration === "number" &&
+      Number.isSafeInteger(iteration) &&
+      iteration >= 1,
+  );
 }

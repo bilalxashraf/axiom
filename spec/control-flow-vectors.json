@@ -1,0 +1,451 @@
+{
+  "format": "AXIOM-CONTROL-FLOW-CONFORMANCE/0.2",
+  "frozen": true,
+  "versions": {
+    "package": "@axiom-lang/core@0.3.0",
+    "language": "0.2",
+    "air": "AIR/0.2",
+    "axlock": "AXLOCK/0.2",
+    "axlog": "AXLOG/0.2"
+  },
+  "program": {
+    "source_name": "control-002.ax",
+    "source": "axiom 0.2;\n\nextern tool chosen(label: Text) -> Unit mode read;\nextern tool poll() -> Bool mode read;\n\ntask Main(flag: Bool) -> Unit\nmust {}\n{\n  if flag then {\n    observe selected_true = chosen(\"then\");\n  } else {\n    observe selected_false = chosen(\"else\");\n  }\n  repeat max 3 {\n    observe done = poll();\n  } until done;\n  complete unit;\n}\n",
+    "semantic_hash": "sha256:973f3326dd3beab95cd927e6c1608728a4a7c9680d8854cb130dd121115deccc",
+    "artifact_hash": "sha256:11eb28d3b607f6fc338eaae1eedb651076a081044e916c427885c9cdeac925d6",
+    "canonical_air": "{\"format\":\"AIR/0.2\",\"language\":\"0.2\",\"ports\":[{\"kind\":\"tool\",\"mode\":\"read\",\"name\":\"chosen\",\"parameters\":[{\"name\":\"label\",\"type\":{\"kind\":\"named\",\"name\":\"Text\"}}],\"returns\":{\"kind\":\"named\",\"name\":\"Unit\"}},{\"kind\":\"tool\",\"mode\":\"read\",\"name\":\"poll\",\"parameters\":[],\"returns\":{\"kind\":\"named\",\"name\":\"Bool\"}}],\"propositions\":[],\"records\":[],\"sourceHash\":\"sha256:3f5a13951c09072d1dd519bc284eedb86717e42a46fc182ac260072a3c1cf081\",\"tasks\":[{\"name\":\"Main\",\"obligations\":[],\"operations\":[{\"condition\":{\"kind\":\"variable\",\"name\":\"flag\"},\"op\":\"if\",\"otherwise\":[{\"arguments\":[{\"kind\":\"literal\",\"value\":\"else\"}],\"destination\":\"selected_false\",\"op\":\"observe\",\"port\":\"chosen\",\"site\":2}],\"site\":0,\"then\":[{\"arguments\":[{\"kind\":\"literal\",\"value\":\"then\"}],\"destination\":\"selected_true\",\"op\":\"observe\",\"port\":\"chosen\",\"site\":1}]},{\"body\":[{\"arguments\":[],\"destination\":\"done\",\"op\":\"observe\",\"port\":\"poll\",\"site\":4}],\"maxIterations\":3,\"op\":\"repeat\",\"site\":3,\"until\":{\"kind\":\"variable\",\"name\":\"done\"}},{\"op\":\"complete\",\"site\":5,\"value\":{\"kind\":\"literal\",\"value\":null}}],\"parameters\":[{\"name\":\"flag\",\"type\":{\"kind\":\"named\",\"name\":\"Bool\"}}],\"returns\":{\"kind\":\"named\",\"name\":\"Unit\"}}]}",
+    "canonical_air_utf8_bytes": 1159,
+    "lock": {
+      "format": "AXLOCK/0.2",
+      "toolchain": {
+        "name": "@axiom-lang/core",
+        "version": "0.3.0",
+        "language": "0.2",
+        "air": "AIR/0.2",
+        "protocol": "AXIP/1"
+      },
+      "program": {
+        "semantic_hash": "sha256:973f3326dd3beab95cd927e6c1608728a4a7c9680d8854cb130dd121115deccc",
+        "artifact_hash": "sha256:11eb28d3b607f6fc338eaae1eedb651076a081044e916c427885c9cdeac925d6",
+        "source_hash": "sha256:3f5a13951c09072d1dd519bc284eedb86717e42a46fc182ac260072a3c1cf081"
+      },
+      "binding": null,
+      "ports": [
+        {
+          "name": "chosen",
+          "kind": "tool",
+          "signature_hash": "sha256:36fafe82ba8f374114c315d2c5b6e538f0a514871e1316424956f5b1b514707d"
+        },
+        {
+          "name": "poll",
+          "kind": "tool",
+          "signature_hash": "sha256:ee04233b4ccb00d3323989240fe9d85f7729229f6ad89b4cdd8dcc9ebad9e2c2"
+        }
+      ],
+      "tasks": [
+        {
+          "name": "Main",
+          "ports": [
+            "chosen",
+            "poll"
+          ],
+          "operation_bound": 7,
+          "effect_bound": 4,
+          "model_attempt_bound": 0,
+          "write_bound": 0,
+          "task_hash": "sha256:90974f610b0efe3e11404a6064854603fa74232413cfdf760775ac5514ec564e"
+        }
+      ]
+    }
+  },
+  "executions": [
+    {
+      "input": {
+        "flag": true
+      },
+      "run_id": "control-true-002",
+      "value": null,
+      "ledger_entries": [
+        {
+          "sequence": 0,
+          "kind": "run",
+          "payload": {
+            "artifact_hash": "sha256:11eb28d3b607f6fc338eaae1eedb651076a081044e916c427885c9cdeac925d6",
+            "format": "AXLOG/0.2",
+            "input_hash": "sha256:2a8199939ad03f40b3086f82c20981e00cff6eabe05aa9d2aac65dbb068306f8",
+            "mode": "live",
+            "program_hash": "sha256:973f3326dd3beab95cd927e6c1608728a4a7c9680d8854cb130dd121115deccc",
+            "run_id": "control-true-002",
+            "source_hash": "sha256:3f5a13951c09072d1dd519bc284eedb86717e42a46fc182ac260072a3c1cf081",
+            "task": "Main",
+            "trusted_bindings": {
+              "fingerprint": "sha256:1efaca139e3b99bc1c98e596948b43b336e25624c55275b56d654d24acf1c759",
+              "id": "fixtures",
+              "model_adapter": "fixtures:model"
+            }
+          },
+          "previous": "sha256:genesis",
+          "hash": "sha256:64df31882faa395e37d3d8b7f6b90cddc345a848fcbca5196c1c543587c4ff5d"
+        },
+        {
+          "sequence": 1,
+          "kind": "branch",
+          "payload": {
+            "iterations": [],
+            "site": 0,
+            "taken": "then"
+          },
+          "previous": "sha256:64df31882faa395e37d3d8b7f6b90cddc345a848fcbca5196c1c543587c4ff5d",
+          "hash": "sha256:8258e58000b02b3820d8ec5afde6ad94d197cfe576f2bb341cb446471a7b96dd"
+        },
+        {
+          "sequence": 2,
+          "kind": "effect_intent",
+          "payload": {
+            "request": {
+              "arguments": [
+                "then"
+              ],
+              "kind": "tool",
+              "mode": "read",
+              "node": "Main:1:chosen",
+              "port": "chosen"
+            }
+          },
+          "previous": "sha256:8258e58000b02b3820d8ec5afde6ad94d197cfe576f2bb341cb446471a7b96dd",
+          "hash": "sha256:9f3ddabaec361e72c6de4b71a58f7e5eb64983edf894e7db29a76c6c7c248c92"
+        },
+        {
+          "sequence": 3,
+          "kind": "effect",
+          "payload": {
+            "request": {
+              "arguments": [
+                "then"
+              ],
+              "kind": "tool",
+              "mode": "read",
+              "node": "Main:1:chosen",
+              "port": "chosen"
+            },
+            "response": {
+              "ok": true,
+              "value": null
+            }
+          },
+          "previous": "sha256:9f3ddabaec361e72c6de4b71a58f7e5eb64983edf894e7db29a76c6c7c248c92",
+          "hash": "sha256:1a244d3a595ac498e10545af36300bbf43e4a883f2d45520c9f36a7b51b87908"
+        },
+        {
+          "sequence": 4,
+          "kind": "effect_intent",
+          "payload": {
+            "request": {
+              "arguments": [],
+              "kind": "tool",
+              "mode": "read",
+              "node": "Main:4@1:poll",
+              "port": "poll"
+            }
+          },
+          "previous": "sha256:1a244d3a595ac498e10545af36300bbf43e4a883f2d45520c9f36a7b51b87908",
+          "hash": "sha256:d2f5038182bae6ba856ba75de8fd5bbfde0b0f362448e94e887e910a42929620"
+        },
+        {
+          "sequence": 5,
+          "kind": "effect",
+          "payload": {
+            "request": {
+              "arguments": [],
+              "kind": "tool",
+              "mode": "read",
+              "node": "Main:4@1:poll",
+              "port": "poll"
+            },
+            "response": {
+              "ok": true,
+              "value": false
+            }
+          },
+          "previous": "sha256:d2f5038182bae6ba856ba75de8fd5bbfde0b0f362448e94e887e910a42929620",
+          "hash": "sha256:fd6731c3ba1fc1d669734b0381ba4ed418839e2873e7ccd7634d1b863b69faee"
+        },
+        {
+          "sequence": 6,
+          "kind": "loop",
+          "payload": {
+            "iteration": 1,
+            "iterations": [
+              1
+            ],
+            "site": 3,
+            "until": false
+          },
+          "previous": "sha256:fd6731c3ba1fc1d669734b0381ba4ed418839e2873e7ccd7634d1b863b69faee",
+          "hash": "sha256:2def61d23c5c3b9caa8a784fe64d8605e4e18e97810786cb2bc43df28821697e"
+        },
+        {
+          "sequence": 7,
+          "kind": "effect_intent",
+          "payload": {
+            "request": {
+              "arguments": [],
+              "kind": "tool",
+              "mode": "read",
+              "node": "Main:4@2:poll",
+              "port": "poll"
+            }
+          },
+          "previous": "sha256:2def61d23c5c3b9caa8a784fe64d8605e4e18e97810786cb2bc43df28821697e",
+          "hash": "sha256:d768e42524860a1d3f6318dc5c4e79f1fc42b94b7a30cc99449caca49c3f0e22"
+        },
+        {
+          "sequence": 8,
+          "kind": "effect",
+          "payload": {
+            "request": {
+              "arguments": [],
+              "kind": "tool",
+              "mode": "read",
+              "node": "Main:4@2:poll",
+              "port": "poll"
+            },
+            "response": {
+              "ok": true,
+              "value": true
+            }
+          },
+          "previous": "sha256:d768e42524860a1d3f6318dc5c4e79f1fc42b94b7a30cc99449caca49c3f0e22",
+          "hash": "sha256:66b47c9378694243b0e0c78c896887df67d3b4d19d9a7d4a88d5691a3242f85c"
+        },
+        {
+          "sequence": 9,
+          "kind": "loop",
+          "payload": {
+            "iteration": 2,
+            "iterations": [
+              2
+            ],
+            "site": 3,
+            "until": true
+          },
+          "previous": "sha256:66b47c9378694243b0e0c78c896887df67d3b4d19d9a7d4a88d5691a3242f85c",
+          "hash": "sha256:f38b2982b7405582afa0850136a167243e448ec4f590cf2bafb7d61a8dbe187e"
+        },
+        {
+          "sequence": 10,
+          "kind": "success",
+          "payload": {
+            "obligations": {},
+            "value": null,
+            "world_epoch": 0
+          },
+          "previous": "sha256:f38b2982b7405582afa0850136a167243e448ec4f590cf2bafb7d61a8dbe187e",
+          "hash": "sha256:2689878fdef65a237e55eb15f0b1d7323efa97c3d5b916c4393a2590cb816ae0"
+        }
+      ],
+      "ledger_root": "sha256:2689878fdef65a237e55eb15f0b1d7323efa97c3d5b916c4393a2590cb816ae0"
+    },
+    {
+      "input": {
+        "flag": false
+      },
+      "run_id": "control-false-002",
+      "value": null,
+      "ledger_entries": [
+        {
+          "sequence": 0,
+          "kind": "run",
+          "payload": {
+            "artifact_hash": "sha256:11eb28d3b607f6fc338eaae1eedb651076a081044e916c427885c9cdeac925d6",
+            "format": "AXLOG/0.2",
+            "input_hash": "sha256:162812b5029481cad8f13633c055ef8dd11002768113523749dcf83a8e597254",
+            "mode": "live",
+            "program_hash": "sha256:973f3326dd3beab95cd927e6c1608728a4a7c9680d8854cb130dd121115deccc",
+            "run_id": "control-false-002",
+            "source_hash": "sha256:3f5a13951c09072d1dd519bc284eedb86717e42a46fc182ac260072a3c1cf081",
+            "task": "Main",
+            "trusted_bindings": {
+              "fingerprint": "sha256:1efaca139e3b99bc1c98e596948b43b336e25624c55275b56d654d24acf1c759",
+              "id": "fixtures",
+              "model_adapter": "fixtures:model"
+            }
+          },
+          "previous": "sha256:genesis",
+          "hash": "sha256:6e554de4820db41c4acceeff142d90ed49b636a09824f415169f1155a40bc614"
+        },
+        {
+          "sequence": 1,
+          "kind": "branch",
+          "payload": {
+            "iterations": [],
+            "site": 0,
+            "taken": "else"
+          },
+          "previous": "sha256:6e554de4820db41c4acceeff142d90ed49b636a09824f415169f1155a40bc614",
+          "hash": "sha256:d63994bdfbd66a7b6f7f1e2a61cd602d2666fddf81eeed294c834be201816283"
+        },
+        {
+          "sequence": 2,
+          "kind": "effect_intent",
+          "payload": {
+            "request": {
+              "arguments": [
+                "else"
+              ],
+              "kind": "tool",
+              "mode": "read",
+              "node": "Main:2:chosen",
+              "port": "chosen"
+            }
+          },
+          "previous": "sha256:d63994bdfbd66a7b6f7f1e2a61cd602d2666fddf81eeed294c834be201816283",
+          "hash": "sha256:6e1ccd7f74c53970ea14b04c597c3f19eed77eb842b4a41d019530d177b31f7b"
+        },
+        {
+          "sequence": 3,
+          "kind": "effect",
+          "payload": {
+            "request": {
+              "arguments": [
+                "else"
+              ],
+              "kind": "tool",
+              "mode": "read",
+              "node": "Main:2:chosen",
+              "port": "chosen"
+            },
+            "response": {
+              "ok": true,
+              "value": null
+            }
+          },
+          "previous": "sha256:6e1ccd7f74c53970ea14b04c597c3f19eed77eb842b4a41d019530d177b31f7b",
+          "hash": "sha256:bc46b3b97909dd315f2f10910ccdfbf3e1477438d9bd5b497501ad87f9d49721"
+        },
+        {
+          "sequence": 4,
+          "kind": "effect_intent",
+          "payload": {
+            "request": {
+              "arguments": [],
+              "kind": "tool",
+              "mode": "read",
+              "node": "Main:4@1:poll",
+              "port": "poll"
+            }
+          },
+          "previous": "sha256:bc46b3b97909dd315f2f10910ccdfbf3e1477438d9bd5b497501ad87f9d49721",
+          "hash": "sha256:2286566106a605a6d1a574903dd3a69677f63b786788d89b93a8f14d30b3b726"
+        },
+        {
+          "sequence": 5,
+          "kind": "effect",
+          "payload": {
+            "request": {
+              "arguments": [],
+              "kind": "tool",
+              "mode": "read",
+              "node": "Main:4@1:poll",
+              "port": "poll"
+            },
+            "response": {
+              "ok": true,
+              "value": false
+            }
+          },
+          "previous": "sha256:2286566106a605a6d1a574903dd3a69677f63b786788d89b93a8f14d30b3b726",
+          "hash": "sha256:0ad3844c68be5c5f7b1abd6be4e432783d9a8b3327e02ae49950fb3367d60d73"
+        },
+        {
+          "sequence": 6,
+          "kind": "loop",
+          "payload": {
+            "iteration": 1,
+            "iterations": [
+              1
+            ],
+            "site": 3,
+            "until": false
+          },
+          "previous": "sha256:0ad3844c68be5c5f7b1abd6be4e432783d9a8b3327e02ae49950fb3367d60d73",
+          "hash": "sha256:f0986ebeb82671dae06c29c2f94fcf255105671643b9dae65f8def396ee811c1"
+        },
+        {
+          "sequence": 7,
+          "kind": "effect_intent",
+          "payload": {
+            "request": {
+              "arguments": [],
+              "kind": "tool",
+              "mode": "read",
+              "node": "Main:4@2:poll",
+              "port": "poll"
+            }
+          },
+          "previous": "sha256:f0986ebeb82671dae06c29c2f94fcf255105671643b9dae65f8def396ee811c1",
+          "hash": "sha256:b23a8e7f0bf21923d031512763082d9e096b2b80636b269e8ea1d74eae2c0720"
+        },
+        {
+          "sequence": 8,
+          "kind": "effect",
+          "payload": {
+            "request": {
+              "arguments": [],
+              "kind": "tool",
+              "mode": "read",
+              "node": "Main:4@2:poll",
+              "port": "poll"
+            },
+            "response": {
+              "ok": true,
+              "value": true
+            }
+          },
+          "previous": "sha256:b23a8e7f0bf21923d031512763082d9e096b2b80636b269e8ea1d74eae2c0720",
+          "hash": "sha256:3be65e8de6373e77d8bef0f57e63f2c53ba87888d0c2a49f71d6eecfd8127566"
+        },
+        {
+          "sequence": 9,
+          "kind": "loop",
+          "payload": {
+            "iteration": 2,
+            "iterations": [
+              2
+            ],
+            "site": 3,
+            "until": true
+          },
+          "previous": "sha256:3be65e8de6373e77d8bef0f57e63f2c53ba87888d0c2a49f71d6eecfd8127566",
+          "hash": "sha256:2e7b6389404e7e2a3070bfa87bbce1a566b644de30a3faac61ce594d0f508e40"
+        },
+        {
+          "sequence": 10,
+          "kind": "success",
+          "payload": {
+            "obligations": {},
+            "value": null,
+            "world_epoch": 0
+          },
+          "previous": "sha256:2e7b6389404e7e2a3070bfa87bbce1a566b644de30a3faac61ce594d0f508e40",
+          "hash": "sha256:842320658e3bb709c73892a97e61cb6bab8d93d16199d8bd9cebfb3bc80e4b9c"
+        }
+      ],
+      "ledger_root": "sha256:842320658e3bb709c73892a97e61cb6bab8d93d16199d8bd9cebfb3bc80e4b9c"
+    }
+  ],
+  "rejected": [
+    {
+      "name": "core-01-if",
+      "code": "A242"
+    },
+    {
+      "name": "repeat-over-policy",
+      "code": "AX1324"
+    },
+    {
+      "name": "repeat-constant-condition",
+      "code": "AX1328"
+    }
+  ]
+}

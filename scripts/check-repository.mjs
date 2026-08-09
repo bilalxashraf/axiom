@@ -103,13 +103,6 @@ if (
   fail("package.json and package-lock.json versions differ");
 }
 if (
-  vectors.versions?.toolchain !==
-  `${packageJson.name}@${packageJson.version}`
-) {
-  fail("The frozen conformance vector names a different toolchain version");
-}
-
-if (
   packageJson.repository?.type !== "git" ||
   !/^git\+https:\/\/github\.com\/[^/]+\/[^/]+\.git$/u.test(
     packageJson.repository?.url ?? "",
@@ -147,6 +140,16 @@ const versionMatch = lockSource.match(
 if (versionMatch?.[1] !== packageJson.version) {
   fail("AXIOM_TOOLCHAIN_VERSION differs from package.json");
 }
+const legacyVersionMatch = lockSource.match(
+  /AXIOM_TOOLCHAIN_VERSION_0_1\s*=\s*"([^"]+)"/u,
+);
+if (
+  legacyVersionMatch === null ||
+  vectors.versions?.toolchain !==
+    `${packageJson.name}@${legacyVersionMatch[1]}`
+) {
+  fail("The frozen Core 0.1 conformance vector names a different legacy toolchain version");
+}
 
 for (const required of [
   ".github/CODEOWNERS",
@@ -157,6 +160,7 @@ for (const required of [
   "LICENSE",
   "SECURITY.md",
   "spec/conformance-vectors.json",
+  "spec/control-flow-vectors.json",
 ]) {
   const path = join(root, required);
   if (!existsSync(path) || !statSync(path).isFile()) {

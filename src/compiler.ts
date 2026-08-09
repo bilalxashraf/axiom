@@ -37,7 +37,12 @@ import type {
   CompiledProgram,
   PropositionMode,
 } from "./ir.ts";
-import { MAX_AXIP_TEXT_SCALARS } from "./limits.ts";
+import {
+  MAX_AXIP_TEXT_SCALARS,
+  MAX_CONTROL_DEPTH,
+  MAX_INFER_ATTEMPTS,
+  MAX_REPEAT_ITERATIONS,
+} from "./limits.ts";
 import { parse } from "./parser.ts";
 import {
   artifactProgramHash,
@@ -53,6 +58,13 @@ type Binding = {
 type ObligationState = {
   readonly proposition: string;
   status: "pending" | "satisfied";
+};
+
+type LoweringContext = {
+  nextSite: number;
+  readonly reservedBindings: Set<string>;
+  controlDepth: number;
+  loopDepth: number;
 };
 
 const BUILTIN_TYPES = new Set(["Bool", "Int", "Text", "Bytes", "Unit", "Json"]);
@@ -148,7 +160,7 @@ class Compiler {
   compile(): CompiledProgram {
     this.collectDeclarations();
     const program: AirProgram = {
-      format: "AIR/0.1",
+      format: this.ast.version === "0.2" ? "AIR/0.2" : "AIR/0.1",
       language: this.ast.version,
       sourceHash: sha256Text(this.source),
       records: [...this.records.values()].map((record) => this.lowerRecord(record)),
@@ -833,6 +845,12 @@ class Compiler {
     for (const parameter of this.lowerParameters(task)) {
       environment.set(parameter.name, { type: parameter.type });
     }
+    const context: LoweringContext = {
+      nextSite: 0,
+      reservedBindings: new Set(environment.keys()),
+      controlDepth: 0,
+      loopDepth: 0,
+    };
 
     const obligations = new Map<string, ObligationState>();
     const airObligations: AirObligation[] = [];
@@ -849,22 +867,16 @@ class Compiler {
     }
 
     const usedEvidence = new Set<string>();
-    const operations: AirOp[] = [];
-    let terminated = false;
-    for (const [index, statement] of task.body.entries()) {
-      if (terminated) {
-        checkError("AX1203", "Statements after `complete` or `fail` are unreachable", statement);
-      }
-      const lowered = this.lowerStatement(
-        statement,
-        index,
-        environment,
-        obligations,
-        usedEvidence,
-      );
-      operations.push(lowered);
-      terminated = lowered.op === "complete" || lowered.op === "fail";
-    }
+    const operations = this.lowerBlock(
+      task.body,
+      environment,
+      obligations,
+      usedEvidence,
+      context,
+      true,
+    );
+    const terminated = operations.at(-1)?.op === "complete" ||
+      operations.at(-1)?.op === "fail";
     if (!terminated) {
       checkError("AX1204", `Task \`${task.name}\` must end in \`complete\` or \`fail\``, task);
     }
@@ -878,13 +890,56 @@ class Compiler {
     };
   }
 
-  private lowerStatement(
-    statement: Stmt,
-    site: number,
+  private lowerBlock(
+    statements: readonly Stmt[],
     environment: Map<string, Binding>,
     obligations: Map<string, ObligationState>,
     usedEvidence: Set<string>,
+    context: LoweringContext,
+    topLevel: boolean,
+  ): AirOp[] {
+    const operations: AirOp[] = [];
+    let terminated = false;
+    for (const statement of statements) {
+      if (terminated) {
+        checkError(
+          "AX1203",
+          "Statements after `complete` or `fail` are unreachable",
+          statement,
+        );
+      }
+      if (
+        !topLevel &&
+        statement.kind === "CompleteStmt"
+      ) {
+        checkError(
+          "AX1206",
+          "`complete` is a task terminal and cannot appear inside a control-flow block",
+          statement,
+        );
+      }
+      const lowered = this.lowerStatement(
+        statement,
+        environment,
+        obligations,
+        usedEvidence,
+        context,
+      );
+      operations.push(lowered);
+      terminated = lowered.op === "complete" || lowered.op === "fail";
+    }
+    return operations;
+  }
+
+  private lowerStatement(
+    statement: Stmt,
+    environment: Map<string, Binding>,
+    obligations: Map<string, ObligationState>,
+    usedEvidence: Set<string>,
+    context: LoweringContext,
   ): AirOp {
+    const site = context.nextSite;
+    context.nextSite += 1;
     switch (statement.kind) {
       case "ObserveStmt": {
         const { name, call } = callParts(statement.expression, statement);
@@ -893,7 +948,7 @@ class Compiler {
           checkError("AX1301", `observe may call only read tools; \`${name}\` is ${port.mode}`, statement);
         }
         const args = this.lowerCallArguments(call, port, environment);
-        this.bind(statement.binding, this.lowerType(port.returnType as TypeNode), statement, environment);
+        this.bind(statement.binding, this.lowerType(port.returnType as TypeNode), statement, environment, context);
         return { op: "observe", site, destination: statement.binding, port: name, arguments: args };
       }
       case "InferStmt": {
@@ -916,11 +971,18 @@ class Compiler {
         ) {
           checkError("AX1302", "infer requires positive input_bytes, output_bytes, and attempts limits", statement);
         }
+        if (this.ast.version === "0.2" && attempts > MAX_INFER_ATTEMPTS) {
+          checkError(
+            "AX1309",
+            `Core 0.2 infer attempts cannot exceed ${MAX_INFER_ATTEMPTS}`,
+            statement,
+          );
+        }
         const resultType: AirType = {
           kind: "candidate",
           value: this.lowerType(port.returnType as TypeNode),
         };
-        this.bind(statement.binding, resultType, statement, environment);
+        this.bind(statement.binding, resultType, statement, environment, context);
         return {
           op: "infer",
           site,
@@ -935,7 +997,7 @@ class Compiler {
         const port = this.requireExtern(name, "validator", statement);
         const args = this.lowerCallArguments(call, port, environment);
         const type = this.lowerType(port.returnType as TypeNode);
-        this.bind(statement.binding, type, statement, environment);
+        this.bind(statement.binding, type, statement, environment, context);
         return { op: "validate", site, destination: statement.binding, port: name, arguments: args };
       }
       case "ActStmt": {
@@ -955,7 +1017,7 @@ class Compiler {
           }
         }
         const type = this.lowerType(port.returnType as TypeNode);
-        this.bind(statement.binding, type, statement, environment);
+        this.bind(statement.binding, type, statement, environment, context);
         return {
           op: "act",
           site,
@@ -970,7 +1032,7 @@ class Compiler {
         const port = this.requireExtern(name, "verifier", statement);
         const args = this.lowerCallArguments(call, port, environment);
         const proposition = propositionName(port.proves as TypeNode);
-        this.bind(statement.binding, { kind: "evidence", proposition }, statement, environment);
+        this.bind(statement.binding, { kind: "evidence", proposition }, statement, environment, context);
         return {
           op: "verify",
           site,
@@ -1017,6 +1079,178 @@ class Compiler {
         const condition = this.lowerExpression(statement.condition, environment, namedType("Bool")).expression;
         return { op: "assert", site, condition, message: "Axiom assertion failed" };
       }
+      case "IfStmt": {
+        if (this.ast.version !== "0.2") {
+          checkError("AX1320", "`if` is available only in Axiom Core 0.2", statement);
+        }
+        if (context.controlDepth >= MAX_CONTROL_DEPTH) {
+          checkError(
+            "AX1321",
+            `Control-flow nesting cannot exceed ${MAX_CONTROL_DEPTH}`,
+            statement,
+          );
+        }
+        const condition = this.lowerExpression(
+          statement.condition,
+          environment,
+          namedType("Bool"),
+        ).expression;
+        const thenEnvironment = new Map(environment);
+        const elseEnvironment = new Map(environment);
+        const thenObligations = this.cloneObligations(obligations);
+        const elseObligations = this.cloneObligations(obligations);
+        const thenEvidence = new Set(usedEvidence);
+        const elseEvidence = new Set(usedEvidence);
+        context.controlDepth += 1;
+        const then = this.lowerBlock(
+          statement.then,
+          thenEnvironment,
+          thenObligations,
+          thenEvidence,
+          context,
+          false,
+        );
+        const otherwise = this.lowerBlock(
+          statement.otherwise,
+          elseEnvironment,
+          elseObligations,
+          elseEvidence,
+          context,
+          false,
+        );
+        context.controlDepth -= 1;
+        const thenContinues = then.at(-1)?.op !== "fail";
+        const elseContinues = otherwise.at(-1)?.op !== "fail";
+        if (!thenContinues && !elseContinues) {
+          checkError(
+            "AX1330",
+            "At least one conditional branch must continue; use a task-level fail when both branches fail",
+            statement,
+          );
+        }
+        for (const [id, obligation] of obligations) {
+          const thenState = thenObligations.get(id);
+          const elseState = elseObligations.get(id);
+          if (thenState === undefined || elseState === undefined) {
+            checkError("AX1329", `Conditional lost obligation \`${id}\``, statement);
+          }
+          if (
+            thenContinues &&
+            elseContinues &&
+            thenState.status !== elseState.status
+          ) {
+            checkError(
+              "AX1322",
+              `Conditional branches must leave obligation \`${id}\` in the same state`,
+              statement,
+            );
+          }
+          obligation.status = thenContinues
+            ? thenState.status
+            : elseState.status;
+        }
+        if (thenContinues) {
+          for (const evidence of thenEvidence) {
+            usedEvidence.add(evidence);
+          }
+        }
+        if (elseContinues) {
+          for (const evidence of elseEvidence) {
+            usedEvidence.add(evidence);
+          }
+        }
+        return { op: "if", site, condition, then, otherwise };
+      }
+      case "RepeatStmt": {
+        if (this.ast.version !== "0.2") {
+          checkError("AX1323", "`repeat` is available only in Axiom Core 0.2", statement);
+        }
+        if (
+          !Number.isSafeInteger(statement.maxIterations) ||
+          statement.maxIterations < 1 ||
+          statement.maxIterations > MAX_REPEAT_ITERATIONS
+        ) {
+          checkError(
+            "AX1324",
+            `repeat max must be between 1 and ${MAX_REPEAT_ITERATIONS}`,
+            statement,
+          );
+        }
+        if (statement.body.length === 0) {
+          checkError("AX1325", "A repeat body cannot be empty", statement);
+        }
+        if (context.controlDepth >= MAX_CONTROL_DEPTH) {
+          checkError(
+            "AX1321",
+            `Control-flow nesting cannot exceed ${MAX_CONTROL_DEPTH}`,
+            statement,
+          );
+        }
+        const forbidden = this.findLoopForbiddenStatement(statement.body);
+        if (forbidden !== undefined) {
+          checkError(
+            "AX1326",
+            "repeat bodies cannot contain verify, satisfy, complete, or fail; verify obligations after the loop exits",
+            forbidden,
+          );
+        }
+        const loopEnvironment = new Map(environment);
+        const loopObligations = this.cloneObligations(obligations);
+        const loopEvidence = new Set(usedEvidence);
+        const outerBindings = new Set(environment.keys());
+        context.controlDepth += 1;
+        context.loopDepth += 1;
+        const body = this.lowerBlock(
+          statement.body,
+          loopEnvironment,
+          loopObligations,
+          loopEvidence,
+          context,
+          false,
+        );
+        context.loopDepth -= 1;
+        context.controlDepth -= 1;
+        if (!this.blockHasExternalEffect(body)) {
+          checkError(
+            "AX1327",
+            "A repeat body must contain an observable external effect",
+            statement,
+          );
+        }
+        const until = this.lowerExpression(
+          statement.until,
+          loopEnvironment,
+          namedType("Bool"),
+        ).expression;
+        const localBindings = new Set(
+          [...loopEnvironment.keys()].filter((name) => !outerBindings.has(name)),
+        );
+        if (
+          ![...this.expressionVariables(until)].some((name) =>
+            localBindings.has(name)
+          )
+        ) {
+          checkError(
+            "AX1328",
+            "repeat until must depend on a binding produced inside the loop body",
+            statement.until,
+          );
+        }
+        for (const [id, obligation] of obligations) {
+          const loopState = loopObligations.get(id);
+          if (loopState === undefined) {
+            checkError("AX1329", `Loop lost obligation \`${id}\``, statement);
+          }
+          obligation.status = loopState.status;
+        }
+        return {
+          op: "repeat",
+          site,
+          maxIterations: statement.maxIterations,
+          body,
+          until,
+        };
+      }
       case "CompleteStmt": {
         const pending = [...obligations.entries()]
           .filter(([, value]) => value.status !== "satisfied")
@@ -1038,6 +1272,102 @@ class Compiler {
       case "FailStmt":
         return { op: "fail", site, message: literalMessage(statement.reason, statement) };
     }
+  }
+
+  private cloneObligations(
+    obligations: ReadonlyMap<string, ObligationState>,
+  ): Map<string, ObligationState> {
+    return new Map(
+      [...obligations].map(([id, obligation]) => [
+        id,
+        { ...obligation },
+      ]),
+    );
+  }
+
+  private findLoopForbiddenStatement(
+    statements: readonly Stmt[],
+  ): Stmt | undefined {
+    for (const statement of statements) {
+      if (
+        statement.kind === "VerifyStmt" ||
+        statement.kind === "SatisfyStmt" ||
+        statement.kind === "CompleteStmt" ||
+        statement.kind === "FailStmt"
+      ) {
+        return statement;
+      }
+      if (statement.kind === "IfStmt") {
+        const nested = this.findLoopForbiddenStatement([
+          ...statement.then,
+          ...statement.otherwise,
+        ]);
+        if (nested !== undefined) {
+          return nested;
+        }
+      }
+      if (statement.kind === "RepeatStmt") {
+        const nested = this.findLoopForbiddenStatement(statement.body);
+        if (nested !== undefined) {
+          return nested;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  private blockHasExternalEffect(operations: readonly AirOp[]): boolean {
+    return operations.some((operation) => {
+      switch (operation.op) {
+        case "observe":
+        case "infer":
+        case "validate":
+        case "act":
+        case "verify":
+          return true;
+        case "if":
+          return this.blockHasExternalEffect(operation.then) ||
+            this.blockHasExternalEffect(operation.otherwise);
+        case "repeat":
+          return this.blockHasExternalEffect(operation.body);
+        case "satisfy":
+        case "assert":
+        case "complete":
+        case "fail":
+          return false;
+      }
+    });
+  }
+
+  private expressionVariables(expression: AirExpr): Set<string> {
+    const variables = new Set<string>();
+    const visit = (value: AirExpr): void => {
+      switch (value.kind) {
+        case "variable":
+          variables.add(value.name);
+          return;
+        case "array":
+          value.items.forEach(visit);
+          return;
+        case "record":
+          value.fields.forEach((field) => visit(field.value));
+          return;
+        case "field":
+          visit(value.target);
+          return;
+        case "call":
+          value.arguments.forEach(visit);
+          return;
+        case "binary":
+          visit(value.left);
+          visit(value.right);
+          return;
+        case "literal":
+          return;
+      }
+    };
+    visit(expression);
+    return variables;
   }
 
   private requireExtern(
@@ -1081,10 +1411,12 @@ class Compiler {
     type: AirType,
     statement: Stmt,
     environment: Map<string, Binding>,
+    context: LoweringContext,
   ): void {
-    if (environment.has(name)) {
+    if (context.reservedBindings.has(name)) {
       checkError("AX1314", `Immutable binding \`${name}\` is already defined`, statement);
     }
+    context.reservedBindings.add(name);
     environment.set(name, { type });
   }
 
@@ -1461,7 +1793,10 @@ export function reviewFormalSemanticsHash(
   semantics: ReviewFormalSemantics,
 ): Sha256 {
   return canonicalHash({
-    format: "AXREVIEW-FORMAL/0.1",
+    format:
+      semantics.language === "0.2"
+        ? "AXREVIEW-FORMAL/0.2"
+        : "AXREVIEW-FORMAL/0.1",
     language: semantics.language,
     records: semantics.records,
     propositions: semantics.propositions,

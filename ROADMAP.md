@@ -1,10 +1,22 @@
 # Axiom roadmap
 
+## Implemented Core 0.2 control profile
+
+- Exhaustive, exact-Boolean `if ... then ... else ...` owned by the VM.
+- Post-test `repeat max N { ... } until ...;` with `N` capped at 1,024,
+  effect-bearing bodies, body-local predicates, fresh iteration frames, and
+  fail-closed `AX2140` exhaustion.
+- Preorder AIR/0.2 sites, iteration-specific effect identities, recursive
+  AXLOCK/0.2 bounds, AXLOG/0.2 control traces, depth 16, and one-million
+  operation/effect admission caps.
+- Frozen Core 0.1 source, AIR, lock, ledger, and conformance-vector support.
+
 ## Alpha exit
 
 - Keep all four CI workflows green across Node 24/26 and Linux/macOS/Windows.
-- Expand the published `AXIOM-CONFORMANCE/0.1` vector into a complete positive
-  and negative corpus with multiple independent consumers.
+- Expand the published `AXIOM-CONFORMANCE/0.1` and
+  `AXIOM-CONTROL-FLOW-CONFORMANCE/0.2` vectors into complete positive and
+  negative corpora with multiple independent consumers.
 - Add recovery tooling for interrupted paired `.ax`/AXMAP publication and
   incomplete AXLOG journals; individual generated files are already published
   with flushed same-directory atomic renames.
@@ -13,7 +25,7 @@
   protection, CODEOWNERS, npm trusted publishing, and protected release
   environment.
 
-## Core 0.2 language
+## Richer language work
 
 - Closed `variant` types, `Option<T>`, `Result<T,E>`, `Never`, and exhaustive
   `match`.

@@ -232,6 +232,8 @@ export type Stmt =
   | VerifyStmt
   | SatisfyStmt
   | AssertStmt
+  | IfStmt
+  | RepeatStmt
   | CompleteStmt
   | FailStmt;
 
@@ -283,6 +285,29 @@ export type SatisfyStmt = {
 export type AssertStmt = {
   readonly kind: "AssertStmt";
   readonly condition: Expr;
+  readonly span: SourceSpan;
+};
+
+/**
+ * Exhaustive conditional. Both branches are explicit so omitted behavior can
+ * never be confused with successful no-op behavior.
+ */
+export type IfStmt = {
+  readonly kind: "IfStmt";
+  readonly condition: Expr;
+  readonly then: readonly Stmt[];
+  readonly otherwise: readonly Stmt[];
+  readonly span: SourceSpan;
+};
+
+/**
+ * Bounded post-test loop. The body executes once before `until` is checked.
+ */
+export type RepeatStmt = {
+  readonly kind: "RepeatStmt";
+  readonly maxIterations: number;
+  readonly body: readonly Stmt[];
+  readonly until: Expr;
   readonly span: SourceSpan;
 };
 

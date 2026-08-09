@@ -1,11 +1,13 @@
 # Axiom design synthesis
 
 Status: non-normative design rationale and roadmap
-Implementation snapshot: `@axiom-lang/core` 0.2.0, Axiom source 0.1,
-`AIR/0.1`, `AXIP/1`, `AXLOCK/0.1`
+Implementation snapshot: `@axiom-lang/core` 0.3.0, Axiom source 0.1 and 0.2,
+`AIR/0.1` and `AIR/0.2`, `AXIP/1`, `AXLOCK/0.1` and `AXLOCK/0.2`
 
-The normative Core language is defined in
-[`LANGUAGE.md`](LANGUAGE.md) and [`../spec/grammar.ebnf`](../spec/grammar.ebnf).
+The normative Core language is defined in [`LANGUAGE.md`](LANGUAGE.md), the
+frozen [`../spec/grammar.ebnf`](../spec/grammar.ebnf), and the Core 0.2
+[`../spec/grammar-0.2.ebnf`](../spec/grammar-0.2.ebnf) and
+[`../spec/semantics-0.2.md`](../spec/semantics-0.2.md).
 This document explains why Axiom has its current shape, which ideas it takes
 from established languages, which ideas it deliberately rejects, and which
 features remain proposals rather than implemented syntax.
@@ -225,7 +227,7 @@ refusing an execution when the
 - **The trusted boundary should be named.** Tool, model, validator, and verifier
   bindings are trusted host integrations. They must not masquerade as pure
   expressions.
-- **Dependency state should be locked.** Axiom's implemented `AXLOCK/0.1`
+- **Dependency state should be locked.** Axiom's implemented AXLOCK profiles
   freezes the toolchain identity, semantic and artifact hashes, port
   signatures, inferred least-authority port sets, static operation/effect
   bounds, and optional host-binding fingerprint for one compiled program.
@@ -248,7 +250,7 @@ refusing an execution when the
 ### 6.3 Axiom decision
 
 The current obligation/evidence discipline and `Candidate<T>` boundary are
-Rust-inspired without importing Rust's general memory model. `AXLOCK/0.1`
+Rust-inspired without importing Rust's general memory model. AXLOCK
 adopts lockfile discipline for a compiled workflow. `Result<T, E>` and
 exhaustive `match` are high-priority roadmap items; neither is implemented
 Axiom source syntax today.
@@ -414,7 +416,8 @@ to Axiom.
 - No ambient filesystem, environment, network, clock, randomness, or process
   access. All such access is a declared port.
 - No reflection or `eval`.
-- No recursion or unbounded loop in the certified Core.
+- No recursion or unbounded loop in the certified Core; Core 0.2 repeats are
+  post-test, literal-bounded, effect-bearing, and admitted recursively.
 - Immutable bindings and canonical data.
 - Deterministic collection ordering where ordering is semantic.
 - A deliberately smaller language than its implementation language.
@@ -487,11 +490,11 @@ Markdown or human-authored .ax
           |
           | parse, type-check, obligation-check, lower
           v
-  canonical AIR/0.1 ----------------------+
+  canonical AIR/0.1 or AIR/0.2 -----------+
           |                               |
           | strict independent verify     | semantic + artifact hashes
           v                               v
-      deterministic VM <------------ AXLOCK/0.1
+      deterministic VM <------------ paired AXLOCK
           |
           +-- observe ------> read binding ---------+
           +-- infer --------> AXIP model adapter ---+--> ordered outcomes
@@ -500,7 +503,7 @@ Markdown or human-authored .ax
           +-- verify -------> verifier -------------+
           |
           v
-  hash-chained durable ledger --> exact effect replay
+  hash-chained durable ledger --> exact effect/control replay
 ```
 
 ### 13.1 Implemented certified-core ideas
@@ -509,6 +512,11 @@ Markdown or human-authored .ax
   Unicode scalar-value text, canonical JSON, and no implicit conversions.
 - **Explicit effects:** `observe`, `infer`, `validate`, `act`, and `verify`
   identify the exact declared port.
+- **VM-owned control:** Core 0.2 adds exhaustive exact-Boolean `if` and
+  post-test `repeat max N` without allowing raw candidates to steer them.
+- **Finite repetition:** repeat bodies are effect-bearing, conditions depend
+  on a body-local binding, iteration frames are fresh, and exhaustion fails
+  with `AX2140` after at most 1,024 iterations.
 - **Untrusted inference:** `infer` yields `Candidate<T>`; only a declared
   validator can produce a usable `T`.
 - **Proof-carrying completion:** named obligations require nominal verifier
@@ -519,8 +527,8 @@ Markdown or human-authored .ax
   the host remains responsible for honoring it.
 - **Portable limits:** every inference declares input bytes, output bytes, and
   attempts; host deadlines bound live adapter calls.
-- **Canonical executable artifact:** strict `AIR/0.1` is revalidated before it
-  executes, even when supplied directly.
+- **Canonical executable artifact:** strict edition-paired AIR is revalidated
+  before it executes, even when supplied directly.
 - **Two hashes:** the semantic program hash excludes source provenance and
   authoring trivia; the artifact hash binds the exact canonical AIR including
   `sourceHash`.
@@ -529,7 +537,7 @@ Markdown or human-authored .ax
   value, and intentionally does not normalize distinct strings silently.
 - **Exact numeric domain:** canonical JSON rejects non-finite and unsafe
   integers and normalizes negative zero.
-- **Locked deployment:** `AXLOCK/0.1` binds the exact program and toolchain,
+- **Locked deployment:** the paired AXLOCK binds the exact program and toolchain,
   port signatures, inferred port capabilities, static operation/effect/model
   attempt/write bounds, and an optional trusted host-binding fingerprint.
 - **Durable audit:** the CLI can create an append-only ledger without
@@ -538,7 +546,9 @@ Markdown or human-authored .ax
   canonical form, sequence, linkage, effect intent/outcome structure, and
   hashes.
 - **Exact replay:** replay matches recorded effect requests at the current
-  program site and fails on divergence instead of calling the outside world.
+  dynamic program site and, for Core 0.2, authenticates the full ordered
+  effect/control/obligation transcript with iteration vectors; it fails on
+  divergence instead of calling the outside world.
 - **Fail-closed Markdown migration:** exact bytes, compiler-derived spans,
   content anchors, explicit dispositions, and a source-wide review seal.
 
@@ -548,8 +558,8 @@ runtime retains authority.
 
 ### 13.2 Explicitly not implemented language features
 
-The following concepts are design roadmap, not accepted Axiom Core 0.1 source
-syntax:
+The following concepts remain design roadmap rather than accepted Core 0.2
+source syntax:
 
 - `Result<T, E>` and user-defined closed variants;
 - exhaustive `match`;
@@ -559,10 +569,10 @@ syntax:
 - scoped resource and transaction syntax;
 - bounded structured concurrency;
 - runtime-generated executable modules;
-- general recursion or loops;
+- general recursion or unbounded/stateful loops;
 - a source-level trust-bypass construct.
 
-`AXLOCK/0.1` locks one already compiled program and its binding contract. It
+AXLOCK locks one already compiled program and its binding contract. It
 must not be confused with a future package manager lock that resolves and
 authenticates a transitive module graph.
 

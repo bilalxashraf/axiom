@@ -1,11 +1,13 @@
-# Axiom Core 0.1
+# Axiom Core 0.1 and 0.2
 
 ## 1. Purpose
 
 Axiom is a language for executing agent workflows under deterministic control.
 The model is a typed external function, not the workflow interpreter.
 
-Core 0.1 is intentionally small. It is sufficient to:
+Core 0.1 is the frozen linear profile. Core 0.2 preserves it and adds
+VM-owned exhaustive conditionals and bounded post-test loops. Together they
+are sufficient to:
 
 1. declare JSON-shaped data;
 2. name propositions that trusted code may verify;
@@ -14,10 +16,15 @@ Core 0.1 is intentionally small. It is sufficient to:
 5. call external ports at explicit sites;
 6. validate model-produced candidates;
 7. attach evidence to obligations; and
-8. prevent successful completion until every obligation is satisfied.
+8. prevent successful completion until every obligation is satisfied; and
+9. select and repeat checked operation sequences without asking a model to
+   interpret control prose.
 
-The normative concrete grammar is
-[`../spec/grammar.ebnf`](../spec/grammar.ebnf).
+The normative Core 0.1 grammar and semantics are
+[`../spec/grammar.ebnf`](../spec/grammar.ebnf) and
+[`../spec/semantics.md`](../spec/semantics.md). Core 0.2 is specified by
+[`../spec/grammar-0.2.ebnf`](../spec/grammar-0.2.ebnf) and
+[`../spec/semantics-0.2.md`](../spec/semantics-0.2.md).
 
 ## 2. Determinism boundary
 
@@ -40,16 +47,17 @@ responses, giving deterministic execution for the recorded run.
 
 ## 3. Program structure
 
-Every source begins with:
+Every source explicitly selects an edition:
 
 ```axiom
 axiom 0.1;
+// or: axiom 0.2;
 ```
 
 Declarations follow in source order. A declaration is a source artifact,
 unresolved or resolved migration disposition, source-wide review seal, record,
 proposition, external port, or task.
-Names occupy one module-wide namespace in Core 0.1 and must be unique where
+Names occupy one module-wide namespace and must be unique where
 ambiguity would result. Identifiers are ASCII letters, digits, and underscore,
 must begin with a letter or underscore, and are capped at 256 characters.
 String literals decode to Unicode scalar sequences; unpaired surrogate escapes
@@ -387,6 +395,49 @@ a literal text reason. Core 0.1 deliberately has no branch, loop, recursion,
 dynamic task generation, exception handling, concurrency, or unrestricted
 `eval`; those features would complicate termination and obligation accounting.
 
+### 8.1 Core 0.2 sequence and control
+
+Core 0.2 retains every operation above and adds:
+
+```axiom
+if ready then {
+  observe selected = use_ready_path();
+} else {
+  observe deferred = use_deferred_path();
+}
+
+repeat max 8 {
+  observe status = poll();
+} until status.done;
+```
+
+A block is an ordered sequence: one operation, including its complete external
+effect outcome, finishes before the next begins. `if` evaluates an exact
+`Bool` once, records the selected branch, and runs only that branch. `else` is
+mandatory. A raw `Candidate<Bool>` cannot select control; a declared validator
+must first narrow it to `Bool`.
+
+`repeat` is post-test, so its body runs at least once. Its literal maximum is
+from 1 through 1024. Each iteration receives a fresh lexical frame, executes
+the body, evaluates `until`, records the decision, and either exits or starts
+the next iteration. A false result on the final permitted iteration fails with
+`AX2140`.
+
+Branch and repeat-body bindings do not escape their control statement. A
+repeat body must be nonempty, contain a declared external effect, and its
+`until` expression must depend on a binding produced in that body. It cannot
+contain `verify`, `satisfy`, `complete`, or `fail`, including through nested
+control. `complete` remains top-level; `fail` may also be the final operation
+of an `if` branch, where a selected failure terminates the task. These
+restrictions keep proof flow conservative and make the repeat bound—not a
+model's claim of progress—the termination argument.
+
+Control nesting is capped at 16, Core 0.2 inference attempts at 16 per site,
+and worst-case task operation and effect bounds at 1,000,000 each. Static
+sites are assigned in preorder. Effects inside repeats add their one-based
+iteration path to the dynamic node identity, so write keys are stable for one
+invocation and distinct across intended iterations.
+
 ## 9. Static checks
 
 A conforming checker rejects at least:
@@ -411,7 +462,8 @@ A conforming checker rejects at least:
 - malformed or out-of-bounds migration provenance.
 
 Source locations are retained for diagnostics. Successful compilation produces
-canonical `AIR/0.1` with two hashes:
+canonical `AIR/0.1` for source edition 0.1 or `AIR/0.2` for source edition
+0.2, with two hashes:
 
 - a domain-separated semantic hash over executable declarations, excluding
   `sourceHash`; and
@@ -429,7 +481,7 @@ VM verifies AIR again before execution.
 
 ## 10. Runtime states
 
-Within a running Core 0.1 task, each obligation is in exactly one state:
+Within a running task, each obligation is in exactly one state:
 
 ```text
 pending -> satisfied
@@ -437,16 +489,17 @@ satisfied(state) -> stale (after a write act)
 stale -> satisfied (with fresh evidence)
 ```
 
-There is no `skipped` state. A task either reaches `complete` with all
-obligations satisfied or terminates unsuccessfully. A later
-conditional-obligation feature may add `inapplicable`, but only with recorded
-proof that its declared guard was false. A model response saying “done” has no
-special meaning.
+There is no `skipped` or implicit `inapplicable` state. In Core 0.2, both
+conditional branches must leave every obligation in the same static state,
+and repeats cannot verify or satisfy obligations. A task either reaches
+top-level `complete` with all obligations satisfied or terminates
+unsuccessfully. A model response saying “done” has no special meaning.
 
 ## 11. AIR and replay
 
-Compilation lowers source to an `AIR/0.1` program containing normalized types,
-ports, tasks, operation sites, and obligation identities. Canonical JSON
+Compilation lowers source to the paired `AIR/0.1` or `AIR/0.2` program
+containing normalized types, ports, tasks, operation sites, and obligation
+identities. Canonical JSON
 serialization sorts object keys by Unicode scalar value and rejects
 fractional/unsafe numbers, unpaired surrogates, excessive nesting, sparse
 arrays, accessors, custom prototypes, cycles, and values whose meaning JSON
@@ -466,7 +519,16 @@ verifier package; a missing fingerprint is recorded as `null`, not silently
 treated as an attestation. Replay preserves the recorded provenance, checks the
 ledger chain and strict entry shapes, matches each intent and recorded request
 to the current effect site, supplies the recorded response, and verifies the
-obligation-transition and terminal transcript.
+obligation-transition and terminal transcript. AXLOG/0.2 additionally records
+`branch` and `loop` decisions with complete iteration vectors; replay
+recomputes rather than trusts them and requires the full ordered
+effect/control/obligation transcript to match.
+
+An execution owns the exclusive writer for a new empty output ledger until it
+records its terminal. Concurrent appends, publication, and close are rejected,
+and a terminal ledger cannot be extended. The runtime snapshots a replay input
+before execution, so output and replay ledgers cannot be aliases or mutable
+transition tapes.
 
 Therefore:
 
@@ -480,7 +542,7 @@ This is replay determinism, not a claim that two live model calls are identical.
 
 ## 12. Markdown migration
 
-Markdown import is not part of the Core 0.1 executable, but the language is
+Markdown import is not part of the Core 0.1 or Core 0.2 executable, but the language is
 designed as its target. The lossless importer assigns every source span a
 stable identifier. Blank spans remain retained provenance. Every nonblank span
 starts as an unresolved hole that prevents strict compilation and must later be
@@ -522,7 +584,7 @@ implies
 every declared task obligation was satisfied by matching verifier evidence.
 ```
 
-Core 0.1 does not guarantee that:
+Neither Core 0.1 nor Core 0.2 guarantees that:
 
 - a natural-language requirement was formalized correctly;
 - a reviewed Markdown resolution is semantically equivalent to its prose;

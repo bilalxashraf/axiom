@@ -2,8 +2,9 @@
 
 ## Status
 
-This document is normative for Axiom Core 0.1, AIR/0.1, AXIP/1, AXLOG/0.1,
-AXMAP/0.1, and AXLOCK/0.1. “Must” and “must not” state conformance
+This document is normative for Axiom Core 0.1 and 0.2, AIR/0.1 and AIR/0.2,
+AXIP/1, AXLOG/0.1 and AXLOG/0.2, AXMAP/0.1, and AXLOCK/0.1 and AXLOCK/0.2.
+“Must” and “must not” state conformance
 requirements.
 
 Axiom Canonical JSON is intentionally not RFC 8785 JCS. It uses a smaller

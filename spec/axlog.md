@@ -32,6 +32,11 @@ A replayable log:
 3. has no unknown kind; and
 4. ends with exactly one `success` or `failure`.
 
+The reference runtime acquires exclusive append authority over a new empty
+output ledger for the duration of one execution. Other append, publication,
+or close attempts fail while execution is active. Appending after `success` or
+`failure` is always invalid.
+
 An `effect_intent` payload has exactly `request`. Its following `effect`
 payload has exactly `request` and `response`, and the two requests must be
 canonically equal. Another intent before an outcome is invalid. A terminal log

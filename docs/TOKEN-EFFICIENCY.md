@@ -35,7 +35,7 @@ maxAttempts    = attempts
 maxTokens      = input_bytes
 ```
 
-The current Core 0.1 source language has no provider-specific token-limit
+The current Core 0.1 and 0.2 source languages have no provider-specific token-limit
 syntax. `maxTokens = input_bytes` is therefore a conservative adapter-facing
 placeholder, not a statement that one byte equals one token. A provider adapter
 may impose a stricter token cap. It may not expand the byte or attempt limits.
@@ -54,9 +54,10 @@ Provider-envelope overhead may have a separately configured finite transport
 allowance, but the decoded AXO text must still satisfy `maxOutputBytes`.
 
 The limits are per attempt. A site with `attempts 3` can send at most three
-frames, each within its declared byte bounds. `AXLOCK/0.1` records the sum of
-declared attempt bounds for each task, but Core 0.1 does not declare one
-task-wide byte quota.
+frames, each within its declared byte bounds. AXLOCK records the worst-case
+attempt bound for each task. AXLOCK/0.2 uses branch maxima and multiplies
+inference attempts inside `repeat` by its literal bound, but neither source
+profile declares one task-wide byte quota.
 
 Byte bounds limit space, not latency. Live model attempts have a separate
 30-second host deadline by default, configurable through
@@ -95,9 +96,24 @@ silently remove fields.
 
 The current VM sets `contextRefs` to an empty list and allows only `candidate`
 and `fail`. AXIP/1 defines a `need_context` response and reference field for
-future or other runtime profiles, but Core 0.1 does not yet provide a context
+future or other runtime profiles, but the current profiles do not yet provide a context
 store, chunking algorithm, reference expansion, or follow-up context round.
 A `need_context` response therefore fails visibly.
+
+### 2.1 Control flow does not become prompt text
+
+Core 0.2 control remains inside AIR and the VM. Neither the unselected branch,
+the repeat body, its maximum, nor prior iteration transcripts are copied into
+an AXIP frame. An inference inside a repeat receives only that site's declared
+arguments, reachable schemas, active obligations, budgets, and dynamic node
+identity. The iteration suffix distinguishes recorded invocations without
+turning the whole loop into model context.
+
+AIR stores a repeat body once rather than unrolling it `N` times. Runtime cost
+can still multiply: an inference with `attempts A` inside `repeat max N` can
+make at most `N * A` model attempts. AXLOCK/0.2 exposes that bound, and each
+attempt retains its own input/output byte caps. This is bounded cost, not free
+cost.
 
 ## 3. Compact AXIP encoding
 
@@ -264,7 +280,7 @@ count.
   encoding.
 - AXIP/1 has no schema-reference cache; reachable definitions are repeated in
   each relevant frame.
-- Core 0.1 has no implemented content chunker or context-reference resolver.
+- the current profiles have no implemented content chunker or context-reference resolver.
 - The source-level byte limits are per attempt, not a task-wide cost budget.
 - Provider token accounting, hidden prompts, cache billing, and tokenizer
   revisions remain provider-specific.

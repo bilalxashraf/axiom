@@ -354,7 +354,7 @@ test("rejects verifier proposition forgery", () => {
 });
 
 test("rejects unsupported future operations in certified Core 0.1", () => {
-  for (const op of ["let", "must", "if"]) {
+  for (const op of ["let", "must", "if", "repeat"]) {
     expectInvalid(
       (program) => {
         program.tasks[0].operations.splice(0, 0, {

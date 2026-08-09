@@ -2,6 +2,7 @@ import {
   canonicalHash,
   canonicalJson,
   canonicalJsonBytes,
+  immutableJsonSnapshot,
   unicodeScalarLength,
   type JsonObject,
   type JsonValue,
@@ -11,6 +12,7 @@ import { CheckError } from "./errors.ts";
 import type {
   AirOp,
   AirPort,
+  AirProgram,
   AirTask,
   CompiledProgram,
 } from "./ir.ts";
@@ -20,10 +22,17 @@ import {
 } from "./program-hash.ts";
 import { MAX_AXIP_TEXT_SCALARS } from "./limits.ts";
 import { AXIP_VERSION } from "./protocol.ts";
+import { verifyAirProgram } from "./air-validator.ts";
 
 export const AXIOM_TOOLCHAIN_NAME = "@axiom-lang/core";
-export const AXIOM_TOOLCHAIN_VERSION = "0.2.0";
+export const AXIOM_TOOLCHAIN_VERSION = "0.3.0";
+/** Frozen reference implementation identity for Core/AIR 0.1 locks. */
+export const AXIOM_TOOLCHAIN_VERSION_0_1 = "0.2.0";
 export const AXIOM_LOCK_FORMAT = "AXLOCK/0.1";
+export const AXIOM_LOCK_FORMAT_0_2 = "AXLOCK/0.2";
+export type AxiomLockFormat =
+  | typeof AXIOM_LOCK_FORMAT
+  | typeof AXIOM_LOCK_FORMAT_0_2;
 
 export interface BindingLock {
   readonly id: string;
@@ -48,10 +57,12 @@ export interface LockedTask {
 }
 
 export interface AxiomLock {
-  readonly format: typeof AXIOM_LOCK_FORMAT;
+  readonly format: AxiomLockFormat;
   readonly toolchain: {
     readonly name: typeof AXIOM_TOOLCHAIN_NAME;
-    readonly version: typeof AXIOM_TOOLCHAIN_VERSION;
+    readonly version:
+      | typeof AXIOM_TOOLCHAIN_VERSION
+      | typeof AXIOM_TOOLCHAIN_VERSION_0_1;
     readonly language: string;
     readonly air: string;
     readonly protocol: typeof AXIP_VERSION;
@@ -74,14 +85,13 @@ function operationPort(operation: AirOp): string | undefined {
     case "act":
     case "verify":
       return operation.port;
-    case "let":
-    case "must":
     case "satisfy":
     case "assert":
     case "complete":
     case "fail":
       return undefined;
     case "if":
+    case "repeat":
       return undefined;
   }
 }
@@ -90,55 +100,179 @@ function compareIdentifier(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function taskBounds(task: AirTask): Omit<LockedTask, "name" | "task_hash"> {
-  const ports = new Set<string>();
-  let effectBound = 0;
-  let modelAttemptBound = 0;
-  let writeBound = 0;
-  for (const operation of task.operations) {
-    const port = operationPort(operation);
-    if (port !== undefined) {
-      ports.add(port);
-    }
-    switch (operation.op) {
-      case "observe":
-      case "validate":
-      case "verify":
-        effectBound += 1;
-        break;
-      case "act":
-        effectBound += 1;
-        writeBound += 1;
-        break;
-      case "infer":
-        effectBound = checkedBoundAdd(
-          effectBound,
-          operation.limits.attempts,
-          task.name,
-        );
-        modelAttemptBound = checkedBoundAdd(
-          modelAttemptBound,
-          operation.limits.attempts,
-          task.name,
-        );
-        break;
-      case "let":
-      case "must":
-      case "satisfy":
-      case "assert":
-      case "complete":
-      case "fail":
-      case "if":
-        break;
-    }
-  }
+type Bounds = {
+  readonly ports: Set<string>;
+  readonly operationBound: number;
+  readonly effectBound: number;
+  readonly modelAttemptBound: number;
+  readonly writeBound: number;
+};
+
+function emptyBounds(): Bounds {
   return {
-    ports: [...ports].sort(compareIdentifier),
-    operation_bound: task.operations.length,
-    effect_bound: effectBound,
-    model_attempt_bound: modelAttemptBound,
-    write_bound: writeBound,
+    ports: new Set(),
+    operationBound: 0,
+    effectBound: 0,
+    modelAttemptBound: 0,
+    writeBound: 0,
   };
+}
+
+function addBounds(left: Bounds, right: Bounds, task: string): Bounds {
+  return {
+    ports: new Set([...left.ports, ...right.ports]),
+    operationBound: checkedBoundAdd(
+      left.operationBound,
+      right.operationBound,
+      task,
+    ),
+    effectBound: checkedBoundAdd(left.effectBound, right.effectBound, task),
+    modelAttemptBound: checkedBoundAdd(
+      left.modelAttemptBound,
+      right.modelAttemptBound,
+      task,
+    ),
+    writeBound: checkedBoundAdd(left.writeBound, right.writeBound, task),
+  };
+}
+
+function branchBounds(left: Bounds, right: Bounds, task: string): Bounds {
+  return {
+    ports: new Set([...left.ports, ...right.ports]),
+    operationBound: checkedBoundAdd(
+      1,
+      Math.max(left.operationBound, right.operationBound),
+      task,
+    ),
+    effectBound: Math.max(left.effectBound, right.effectBound),
+    modelAttemptBound: Math.max(
+      left.modelAttemptBound,
+      right.modelAttemptBound,
+    ),
+    writeBound: Math.max(left.writeBound, right.writeBound),
+  };
+}
+
+function multiplyBounds(
+  body: Bounds,
+  multiplier: number,
+  task: string,
+): Bounds {
+  return {
+    ports: new Set(body.ports),
+    operationBound: checkedBoundAdd(
+      1,
+      checkedBoundMultiply(body.operationBound, multiplier, task),
+      task,
+    ),
+    effectBound: checkedBoundMultiply(body.effectBound, multiplier, task),
+    modelAttemptBound: checkedBoundMultiply(
+      body.modelAttemptBound,
+      multiplier,
+      task,
+    ),
+    writeBound: checkedBoundMultiply(body.writeBound, multiplier, task),
+  };
+}
+
+function operationBounds(operation: AirOp, task: string): Bounds {
+  const port = operationPort(operation);
+  const ports = new Set(port === undefined ? [] : [port]);
+  switch (operation.op) {
+    case "observe":
+    case "validate":
+    case "verify":
+      return {
+        ports,
+        operationBound: 1,
+        effectBound: 1,
+        modelAttemptBound: 0,
+        writeBound: 0,
+      };
+    case "act":
+      return {
+        ports,
+        operationBound: 1,
+        effectBound: 1,
+        modelAttemptBound: 0,
+        writeBound: 1,
+      };
+    case "infer":
+      return {
+        ports,
+        operationBound: 1,
+        effectBound: operation.limits.attempts,
+        modelAttemptBound: operation.limits.attempts,
+        writeBound: 0,
+      };
+    case "if":
+      return branchBounds(
+        blockBounds(operation.then, task),
+        blockBounds(operation.otherwise, task),
+        task,
+      );
+    case "repeat":
+      return multiplyBounds(
+        blockBounds(operation.body, task),
+        operation.maxIterations,
+        task,
+      );
+    case "satisfy":
+    case "assert":
+    case "complete":
+    case "fail":
+      return {
+        ports,
+        operationBound: 1,
+        effectBound: 0,
+        modelAttemptBound: 0,
+        writeBound: 0,
+      };
+  }
+}
+
+function blockBounds(operations: readonly AirOp[], task: string): Bounds {
+  return operations.reduce(
+    (total, operation) => addBounds(total, operationBounds(operation, task), task),
+    emptyBounds(),
+  );
+}
+
+function taskBounds(task: AirTask): Omit<LockedTask, "name" | "task_hash"> {
+  const bounds = blockBounds(task.operations, task.name);
+  return {
+    ports: [...bounds.ports].sort(compareIdentifier),
+    operation_bound: bounds.operationBound,
+    effect_bound: bounds.effectBound,
+    model_attempt_bound: bounds.modelAttemptBound,
+    write_bound: bounds.writeBound,
+  };
+}
+
+function checkedBoundMultiply(
+  value: number,
+  multiplier: number,
+  task: string,
+): number {
+  if (
+    !Number.isSafeInteger(value) ||
+    !Number.isSafeInteger(multiplier) ||
+    value < 0 ||
+    multiplier < 0
+  ) {
+    throw new CheckError(
+      "AX1607",
+      `Static bound for task ${JSON.stringify(task)} requires non-negative safe integers`,
+    );
+  }
+  const result = value * multiplier;
+  if (!Number.isSafeInteger(result)) {
+    throw new CheckError(
+      "AX1607",
+      `Static effect bound for task ${JSON.stringify(task)} exceeds the safe integer range`,
+    );
+  }
+  return result;
 }
 
 function checkedBoundAdd(
@@ -146,6 +280,17 @@ function checkedBoundAdd(
   increment: number,
   task: string,
 ): number {
+  if (
+    !Number.isSafeInteger(current) ||
+    !Number.isSafeInteger(increment) ||
+    current < 0 ||
+    increment < 0
+  ) {
+    throw new CheckError(
+      "AX1606",
+      `Static bound for task ${JSON.stringify(task)} requires non-negative safe integers`,
+    );
+  }
   const result = current + increment;
   if (!Number.isSafeInteger(result)) {
     throw new CheckError(
@@ -156,35 +301,42 @@ function checkedBoundAdd(
   return result;
 }
 
-function portLock(port: AirPort): LockedPort {
+function portLock(port: AirPort, air: AirProgram["format"]): LockedPort {
   return {
     name: port.name,
     kind: port.kind,
     signature_hash: canonicalHash({
-      domain: "AXIOM-PORT/0.1",
+      domain: air === "AIR/0.2" ? "AXIOM-PORT/0.2" : "AXIOM-PORT/0.1",
       port,
     }),
   };
 }
 
-function taskLock(task: AirTask): LockedTask {
+function taskLock(task: AirTask, air: AirProgram["format"]): LockedTask {
   return {
     name: task.name,
     ...taskBounds(task),
     task_hash: canonicalHash({
-      domain: "AXIOM-TASK/0.1",
+      domain: air === "AIR/0.2" ? "AXIOM-TASK/0.2" : "AXIOM-TASK/0.1",
       task,
     }),
   };
 }
 
-function assertCompiledSeals(compiled: CompiledProgram): void {
+function certifiedCompiledSnapshot(compiled: CompiledProgram): CompiledProgram {
+  const claimedHash = compiled.hash;
+  const claimedArtifactHash = compiled.artifactHash;
+  const claimedBytes = Uint8Array.from(compiled.bytes);
+  const program = immutableJsonSnapshot(
+    compiled.program,
+  ) as unknown as AirProgram;
+  verifyAirProgram(program);
   if (
-    compiled.hash !== semanticProgramHash(compiled.program) ||
-    compiled.artifactHash !== artifactProgramHash(compiled.program) ||
+    claimedHash !== semanticProgramHash(program) ||
+    claimedArtifactHash !== artifactProgramHash(program) ||
     Buffer.compare(
-      Buffer.from(compiled.bytes),
-      Buffer.from(canonicalJsonBytes(compiled.program)),
+      Buffer.from(claimedBytes),
+      Buffer.from(canonicalJsonBytes(program)),
     ) !== 0
   ) {
     throw new CheckError(
@@ -192,13 +344,19 @@ function assertCompiledSeals(compiled: CompiledProgram): void {
       "Cannot lock a CompiledProgram whose semantic hash, artifact hash, or bytes are invalid",
     );
   }
+  return {
+    hash: claimedHash,
+    artifactHash: claimedArtifactHash,
+    bytes: canonicalJsonBytes(program),
+    program,
+  };
 }
 
 export function createProgramLock(
   compiled: CompiledProgram,
   binding: BindingLock | null = null,
 ): AxiomLock {
-  assertCompiledSeals(compiled);
+  const certified = certifiedCompiledSnapshot(compiled);
   if (binding !== null) {
     let bindingIdLength: number;
     try {
@@ -226,25 +384,31 @@ export function createProgramLock(
     }
   }
   return {
-    format: AXIOM_LOCK_FORMAT,
+    format:
+      certified.program.format === "AIR/0.2"
+        ? AXIOM_LOCK_FORMAT_0_2
+        : AXIOM_LOCK_FORMAT,
     toolchain: {
       name: AXIOM_TOOLCHAIN_NAME,
-      version: AXIOM_TOOLCHAIN_VERSION,
-      language: compiled.program.language,
-      air: compiled.program.format,
+      version:
+        certified.program.format === "AIR/0.2"
+          ? AXIOM_TOOLCHAIN_VERSION
+          : AXIOM_TOOLCHAIN_VERSION_0_1,
+      language: certified.program.language,
+      air: certified.program.format,
       protocol: AXIP_VERSION,
     },
     program: {
-      semantic_hash: compiled.hash as Sha256,
-      artifact_hash: compiled.artifactHash as Sha256,
-      source_hash: compiled.program.sourceHash as Sha256,
+      semantic_hash: certified.hash as Sha256,
+      artifact_hash: certified.artifactHash as Sha256,
+      source_hash: certified.program.sourceHash as Sha256,
     },
     binding,
-    ports: compiled.program.ports
-      .map(portLock)
+    ports: certified.program.ports
+      .map((port) => portLock(port, certified.program.format))
       .sort((left, right) => compareIdentifier(left.name, right.name)),
-    tasks: compiled.program.tasks
-      .map(taskLock)
+    tasks: certified.program.tasks
+      .map((task) => taskLock(task, certified.program.format))
       .sort((left, right) => compareIdentifier(left.name, right.name)),
   };
 }
@@ -277,10 +441,14 @@ export function verifyProgramLock(
     );
   }
   const actualObject = actual as JsonObject;
-  if (actualObject.format !== AXIOM_LOCK_FORMAT) {
+  const expectedFormat =
+    compiled.program.format === "AIR/0.2"
+      ? AXIOM_LOCK_FORMAT_0_2
+      : AXIOM_LOCK_FORMAT;
+  if (actualObject.format !== expectedFormat) {
     throw new CheckError(
       "AX1604",
-      `Expected a canonical ${AXIOM_LOCK_FORMAT} object`,
+      `Expected a canonical ${expectedFormat} object`,
     );
   }
   const expected = createProgramLock(compiled, binding);

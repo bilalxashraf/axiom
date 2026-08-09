@@ -6,6 +6,7 @@ import {
 import type { AirProgram } from "./ir.ts";
 
 export const SEMANTIC_HASH_DOMAIN = "AXIOM-PROGRAM/0.1";
+export const SEMANTIC_HASH_DOMAIN_0_2 = "AXIOM-PROGRAM/0.2";
 
 /**
  * Hash only executable semantics. `sourceHash` remains in AIR as provenance,
@@ -22,7 +23,10 @@ export function semanticProgramHash(program: AirProgram): Sha256 {
     tasks: program.tasks,
   };
   return canonicalHash({
-    domain: SEMANTIC_HASH_DOMAIN,
+    domain:
+      program.format === "AIR/0.2"
+        ? SEMANTIC_HASH_DOMAIN_0_2
+        : SEMANTIC_HASH_DOMAIN,
     program: semanticProgram,
   });
 }

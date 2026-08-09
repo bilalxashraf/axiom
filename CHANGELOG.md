@@ -3,6 +3,40 @@
 All notable toolchain changes are recorded here. Language, AIR, AXIP, AXLOG,
 AXMAP, and AXLOCK versions evolve independently of the npm package version.
 
+## 0.3.0 - 2026-08-09
+
+### Added
+
+- Axiom Core 0.2 source with exhaustive `if ... then ... else ...` and bounded
+  post-test `repeat max N { ... } until ...;` control owned by the VM.
+- `AIR/0.2` recursive control operations, canonical preorder static sites,
+  lexical branch/loop bindings, and iteration-specific dynamic node IDs.
+- Repeat admission rules: literal maximum 1..1024, nonempty effect-bearing
+  body, body-local Boolean exit dependency, fresh iteration frames, forbidden
+  proof/task terminals in loops, and fail-closed `AX2140` exhaustion.
+- Recursive control depth and resource admission: depth 16, inference attempts
+  16 per Core 0.2 site, and one-million worst-case operation/effect caps.
+- `AXLOCK/0.2` recursive port and bound inference using branch maxima and
+  repeat multiplication, with Core 0.2 hash domains.
+- `AXLOG/0.2` canonical `branch` and `loop` entries with complete iteration
+  vectors plus authentication of the full ordered effect/control/obligation
+  replay transcript.
+- Exclusive execution ownership for empty output ledgers, terminal sealing,
+  and rejection of concurrent appends that could split an effect pair.
+- Control-flow compiler, hostile-AIR, lock-bound, dynamic-write-key,
+  exhaustion, immutable AIR/replay admission, and tampered-replay tests.
+- Versioned Core 0.2 grammar, operational semantics, lock, and ledger specs,
+  plus frozen `AXIOM-CONTROL-FLOW-CONFORMANCE/0.2` vectors.
+
+### Compatibility
+
+- Core 0.1, `AIR/0.1`, `AXLOCK/0.1`, `AXLOG/0.1`, and the frozen
+  `AXIOM-CONFORMANCE/0.1` vector remain supported under their original rules.
+- Source/AIR/lock/ledger versions are exact pairs; Core 0.2 control is never
+  silently interpreted as Core 0.1.
+- The npm package version is 0.3.0; AXIP remains AXIP/1 and AXMAP remains
+  AXMAP/0.1.
+
 ## 0.2.0 - 2026-07-28
 
 ### Added

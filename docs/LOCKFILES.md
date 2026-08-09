@@ -1,6 +1,6 @@
-# AXLOCK/0.1 program locks
+# AXLOCK/0.1 and AXLOCK/0.2 program locks
 
-`AXLOCK/0.1` freezes the program facts that a host should approve before
+The edition-paired AXLOCK freezes the program facts that a host should approve before
 execution: toolchain profile, program identities, port contracts, inferred task
 capabilities, finite static bounds, and an optional trusted binding identity.
 
@@ -27,7 +27,7 @@ node dist/src/cli.js verify-lock examples/fix.ax \
   --fixtures examples/fixtures.json
 ```
 
-The commands also accept an `AIR/0.1` file:
+The commands also accept an `AIR/0.1` or `AIR/0.2` file:
 
 ```sh
 node dist/src/cli.js lock fix.air --output axiom.lock
@@ -71,10 +71,10 @@ The exported TypeScript shape is:
 
 ```ts
 interface AxiomLock {
-  format: "AXLOCK/0.1";
+  format: "AXLOCK/0.1" | "AXLOCK/0.2";
   toolchain: {
     name: "@axiom-lang/core";
-    version: "0.2.0";
+    version: "0.2.0" | "0.3.0";
     language: string;
     air: string;
     protocol: "AXIP/1";
@@ -105,8 +105,10 @@ interface AxiomLock {
 }
 ```
 
-In the current toolchain, `language` is `0.1` and `air` is `AIR/0.1`. Ports and
-tasks are sorted by name. Each task's port list is unique and sorted.
+The format pairing is exact: language 0.1 uses AIR/0.1, AXLOCK/0.1, and the
+frozen toolchain identity 0.2.0; language 0.2 uses AIR/0.2, AXLOCK/0.2, and
+toolchain identity 0.3.0. Ports and tasks are sorted by name. Each task's port
+list is unique and sorted.
 
 `createProgramLock` first checks that a `CompiledProgram`'s semantic hash,
 artifact hash, and canonical bytes match its AIR object. A caller cannot create
@@ -134,7 +136,7 @@ Every AIR port is hashed as:
 
 ```text
 canonicalHash({
-  domain: "AXIOM-PORT/0.1",
+  domain: "AXIOM-PORT/0.1" | "AXIOM-PORT/0.2",
   port: <complete AIR port object>
 })
 ```
@@ -167,7 +169,9 @@ act
 verify
 ```
 
-The resulting `ports` array is the exact sorted set used by that task's AIR.
+For AIR/0.2 the scan recursively unions both conditional branches and every
+repeat body. The resulting `ports` array is the exact sorted static set used
+by that task's AIR.
 Operations such as `satisfy`, `assert`, `complete`, and `fail` add no external
 port.
 
@@ -183,13 +187,14 @@ The lock records four nonnegative safe-integer bounds per task.
 
 ### `operation_bound`
 
-The number of top-level AIR operations in the task. An `infer` is one
-operation regardless of its retry count.
+For Core 0.1 this is the number of top-level AIR operations. For Core 0.2 it
+is recursive: a conditional contributes one plus the larger branch bound, and
+a repeat contributes one plus its body bound multiplied by `max`. An `infer`
+is one operation regardless of its retry count.
 
 ### `effect_bound`
 
-The maximum number of Axiom external-effect dispatches implied by the
-straight-line Core 0.1 task:
+The maximum number of Axiom external-effect dispatches implied by the task:
 
 ```text
 observe  = 1
@@ -201,20 +206,24 @@ infer    = declared attempts
 
 Pure and obligation operations add zero. Counting all declared inference
 attempts makes this an upper bound; a candidate may succeed before the final
-attempt.
+attempt. Core 0.2 uses the maximum of conditional branches and multiplies a
+repeat body by its literal bound.
 
 ### `model_attempt_bound`
 
-The sum of every inference site's declared `attempts`. It isolates the
-nondeterministic model boundary from other effects.
+The worst-case sum of inference attempts on one execution path. Core 0.2 uses
+branch maxima and repeat multiplication. It isolates the nondeterministic
+model boundary from other effects.
 
 ### `write_bound`
 
-The number of `act` operations. Each action carries a runtime-derived
-idempotency key, but the bound itself counts declared action sites.
+The worst-case number of `act` executions. Each action carries a
+runtime-derived idempotency key; Core 0.2 uses branch maxima and repeat
+multiplication.
 
-Bound addition is checked against JavaScript's safe-integer range. A task whose
-inferred total overflows is not lockable.
+Bound addition and multiplication are checked against the safe-integer range.
+Core 0.2 also rejects operation or effect bounds above 1,000,000, repeats over
+1,024, control depth over 16, and inference attempts over 16 per site.
 
 These values count calls visible to the Axiom VM. They do not bound work
 performed behind one tool call, provider-side retries, external fan-out,
@@ -227,7 +236,7 @@ Each task is hashed as:
 
 ```text
 canonicalHash({
-  domain: "AXIOM-TASK/0.1",
+  domain: "AXIOM-TASK/0.1" | "AXIOM-TASK/0.2",
   task: <complete AIR task object>
 })
 ```
@@ -309,7 +318,7 @@ lock's origin, and refuse a null or untrusted binding. Merely placing
 
 ## 10. What AXLOCK does not lock
 
-AXLOCK/0.1 does not currently contain:
+Neither AXLOCK/0.1 nor AXLOCK/0.2 currently contains:
 
 - package dependency graphs or registry integrity fields;
 - task inputs, run IDs, model outputs, or tool responses;

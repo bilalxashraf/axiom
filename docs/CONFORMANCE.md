@@ -6,9 +6,10 @@ Passing an adapter probe does not certify an Axiom compiler, and passing the
 compiler tests does not establish model quality.
 
 The TypeScript package is the current reference prototype. It does not yet
-operate a certification service. It does ship the first frozen, versioned
-golden vector at `spec/conformance-vectors.json`; that vector is a precise
-interoperability anchor, not a complete certification corpus.
+operate a certification service. It ships frozen, versioned golden vectors at
+`spec/conformance-vectors.json` for Core 0.1 and
+`spec/control-flow-vectors.json` for Core 0.2. They are precise
+interoperability anchors, not a complete certification corpus.
 
 ## 1. Local verification
 
@@ -77,6 +78,15 @@ rejection of unknown or missing fields, duplicate declarations, invalid types,
 wrong ports, forged candidates or evidence, invalid operation sites, broken
 terminal flow, and invalid obligation transitions. A canonical hash is not
 treated as a substitute for semantic verification.
+
+The Core 0.2 control suite and frozen
+`spec/control-flow-vectors.json` corpus additionally check preorder sites, exact one-branch
+execution, candidate exclusion from conditions, lexical non-escape, post-test
+loop ordering, fresh iteration frames, 1..1024 repeat bounds, effect-bearing
+progress, body-local termination predicates, dynamic iteration node IDs,
+distinct loop-write keys, recursive lock bounds, portable task caps, and exact
+live/replay control traces. Hostile AIR and tampered `branch`/`loop` entries
+must fail closed.
 
 ### Canonical data and deterministic properties
 
@@ -275,9 +285,9 @@ contracts upward:
 1. Implement the JSON value domain and canonical serialization: safe integers,
    Unicode scalar strings, Unicode-scalar key order, depth bound, duplicate-key
    rejection, canonical base64, and SHA-256 domain separation.
-2. Implement the `axiom 0.1` lexer, parser, and static checks from the grammar
-   and language document.
-3. Lower source into exact `AIR/0.1` shapes and produce canonical bytes,
+2. Implement frozen `axiom 0.1` from `grammar.ebnf`, then implement
+   `axiom 0.2` from `grammar-0.2.ebnf` as a separate selected edition.
+3. Lower source into exact paired `AIR/0.1` or `AIR/0.2` shapes and produce canonical bytes,
    semantic hashes, and artifact hashes.
 4. Implement a strict AIR verifier independently from the lowering code. It
    must reject unknown fields and re-establish types, immutable bindings,
@@ -286,7 +296,7 @@ contracts upward:
    external effects.
 6. Add typed ports, AXIP/1 framing, bounded adapters, effect intents, ledger
    chaining, and replay matching.
-7. Add AXMAP/0.1 provenance verification and AXLOCK/0.1 creation/verification.
+7. Add AXMAP/0.1 provenance verification and paired AXLOCK creation/verification.
 8. Run the shared golden vectors, generated property corpus, adversarial AIR
    mutations, and differential executions against the reference package.
 
@@ -313,6 +323,14 @@ Reference package: @axiom-lang/core 0.2.0
 Golden corpus: AXIOM-CONFORMANCE/0.1
 Host/runtime: <implementation and version>
 ```
+
+For a Core 0.2 report, replace the source, AIR, lock, ledger, and package lines
+with `axiom 0.2`, `AIR/0.2`, `AXLOCK/0.2`, `AXLOG/0.2`, and
+`@axiom-lang/core 0.3.0`. The checked-in frozen
+`AXIOM-CONFORMANCE/0.1` vector remains a Core 0.1 anchor. The separately frozen
+`AXIOM-CONTROL-FLOW-CONFORMANCE/0.2` corpus anchors Core 0.2 canonical AIR,
+AXLOCK/0.2, both branch outcomes, loop traces with iteration vectors, exact
+ledgers, and roots.
 
 Passing this repository's tests means that one build of the reference
 prototype satisfies its current executable suite. It is evidence, not a

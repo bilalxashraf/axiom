@@ -3,6 +3,7 @@ import { CheckError } from "./errors.ts";
 import type {
   AirExpr,
   AirObligation,
+  AirOp,
   AirParameter,
   AirPort,
   AirProgram,
@@ -14,7 +15,12 @@ import type {
 } from "./ir.ts";
 import {
   MAX_AXIP_TEXT_SCALARS,
+  MAX_CONTROL_DEPTH,
   MAX_IDENTIFIER_LENGTH,
+  MAX_INFER_ATTEMPTS,
+  MAX_REPEAT_ITERATIONS,
+  MAX_TASK_EFFECT_BOUND,
+  MAX_TASK_OPERATION_BOUND,
 } from "./limits.ts";
 import { typeEquals, typeToString } from "./types.ts";
 
@@ -33,6 +39,19 @@ type EvidenceState = {
   consumed: boolean;
 };
 
+type ControlEvidenceState = {
+  readonly proposition: string;
+  readonly mode: PropositionMode;
+  valid: boolean;
+  consumed: boolean;
+};
+
+type ControlState = {
+  readonly environment: Map<string, AirType>;
+  readonly obligations: Map<string, ObligationState>;
+  readonly evidence: Map<string, ControlEvidenceState>;
+};
+
 const BUILTIN_TYPES = new Set([
   "Bool",
   "Int",
@@ -46,7 +65,12 @@ const TYPE_CONSTRUCTORS = new Set(["List", "Candidate", "Evidence"]);
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
 const TERMINALS = new Set(["complete", "fail"]);
-const UNSUPPORTED_CORE_OPERATIONS = new Set(["let", "must", "if"]);
+const UNSUPPORTED_CORE_OPERATIONS = new Set([
+  "let",
+  "must",
+  "if",
+  "repeat",
+]);
 const BINARY_OPERATORS = new Set([
   "||",
   "&&",
@@ -64,7 +88,7 @@ const BINARY_OPERATORS = new Set([
 ]);
 
 function reject(path: string, message: string): never {
-  throw new CheckError("AX1500", `Invalid AIR/0.1 at ${path}: ${message}`);
+  throw new CheckError("AX1500", `Invalid AIR at ${path}: ${message}`);
 }
 
 function objectAt(value: unknown, path: string): UnknownObject {
@@ -219,11 +243,14 @@ class AirVerifier {
       ],
       "$",
     );
-    if (root.format !== "AIR/0.1") {
-      reject("$.format", "expected exactly \"AIR/0.1\"");
-    }
-    if (root.language !== "0.1") {
-      reject("$.language", "expected exactly \"0.1\"");
+    const supportedPair =
+      (root.format === "AIR/0.1" && root.language === "0.1") ||
+      (root.format === "AIR/0.2" && root.language === "0.2");
+    if (!supportedPair) {
+      reject(
+        "$.format",
+        "expected the paired format/language AIR/0.1 + 0.1 or AIR/0.2 + 0.2",
+      );
     }
     const sourceHash = stringAt(root.sourceHash, "$.sourceHash");
     if (!SHA256.test(sourceHash)) {
@@ -517,13 +544,23 @@ class AirVerifier {
         taskIndex,
         environment,
       );
-      this.verifyOperations(
-        task,
-        taskIndex,
-        environment,
-        obligations,
-        returns,
-      );
+      if (this.program.format === "AIR/0.2") {
+        this.verifyControlOperations(
+          task,
+          taskIndex,
+          environment,
+          obligations,
+          returns,
+        );
+      } else {
+        this.verifyOperations(
+          task,
+          taskIndex,
+          environment,
+          obligations,
+          returns,
+        );
+      }
     });
   }
 
@@ -918,6 +955,697 @@ class AirVerifier {
           reject(`${path}.op`, `unknown operation ${JSON.stringify(op)}`);
       }
     });
+  }
+
+  /** Independently verifies the recursive, bounded AIR/0.2 control profile. */
+  private verifyControlOperations(
+    task: AirTask,
+    taskIndex: number,
+    environment: Map<string, AirType>,
+    obligations: Map<string, ObligationState>,
+    returns: AirType,
+  ): void {
+    const path = `$.tasks[${taskIndex}].operations`;
+    const operations = arrayAt(task.operations, path);
+    const objects = operations.map((operation, index) =>
+      objectAt(operation, `${path}[${index}]`)
+    );
+    const terminals = objects.flatMap((operation, index) => {
+      const op = stringAt(operation.op, `${path}[${index}].op`);
+      return TERMINALS.has(op) ? [index] : [];
+    });
+    if (terminals.length !== 1) {
+      reject(path, "task must contain exactly one top-level terminal operation");
+    }
+    if (terminals[0] !== objects.length - 1) {
+      reject(
+        `${path}[${terminals[0] as number}]`,
+        "terminal operation must be the final top-level operation",
+      );
+    }
+
+    const state: ControlState = {
+      environment,
+      obligations,
+      evidence: new Map(),
+    };
+    this.verifyControlBlock(
+      operations,
+      path,
+      state,
+      returns,
+      { next: 0 },
+      new Set(environment.keys()),
+      0,
+      false,
+      true,
+    );
+    const bounds = this.controlBounds(task.operations);
+    if (bounds.operations > MAX_TASK_OPERATION_BOUND) {
+      reject(
+        path,
+        `worst-case operation bound ${bounds.operations} exceeds ${MAX_TASK_OPERATION_BOUND}`,
+      );
+    }
+    if (bounds.effects > MAX_TASK_EFFECT_BOUND) {
+      reject(
+        path,
+        `worst-case effect bound ${bounds.effects} exceeds ${MAX_TASK_EFFECT_BOUND}`,
+      );
+    }
+  }
+
+  private verifyControlBlock(
+    value: unknown,
+    path: string,
+    state: ControlState,
+    returns: AirType,
+    sites: { next: number },
+    reservedBindings: Set<string>,
+    depth: number,
+    insideRepeat: boolean,
+    topLevel: boolean,
+  ): void {
+    if (depth > MAX_CONTROL_DEPTH) {
+      reject(path, `control-flow nesting cannot exceed ${MAX_CONTROL_DEPTH}`);
+    }
+    const operations = arrayAt(value, path);
+    operations.forEach((operationValue, index) => {
+      const operationPath = `${path}[${index}]`;
+      const operation = objectAt(operationValue, operationPath);
+      const op = stringAt(operation.op, `${operationPath}.op`);
+      if (op === "let" || op === "must") {
+        reject(
+          `${operationPath}.op`,
+          `${JSON.stringify(op)} is not an operation in certified Core 0.2`,
+        );
+      }
+      if (!topLevel && op === "complete") {
+        reject(
+          `${operationPath}.op`,
+          "complete cannot appear inside a control-flow block",
+        );
+      }
+      if (!topLevel && op === "fail" && index !== operations.length - 1) {
+        reject(
+          `${operationPath}.op`,
+          "fail must be the final operation in its control-flow block",
+        );
+      }
+      if (
+        insideRepeat &&
+        (op === "verify" ||
+          op === "satisfy" ||
+          op === "complete" ||
+          op === "fail")
+      ) {
+        reject(
+          `${operationPath}.op`,
+          "repeat bodies cannot contain verify, satisfy, complete, or fail",
+        );
+      }
+
+      const expectedSite = sites.next;
+      sites.next += 1;
+
+      switch (op) {
+        case "observe": {
+          exactKeys(
+            operation,
+            ["op", "site", "destination", "port", "arguments"],
+            operationPath,
+          );
+          this.verifySite(operation.site, expectedSite, `${operationPath}.site`);
+          const port = this.requirePort(operation.port, "tool", operationPath);
+          if (port.mode !== "read") {
+            reject(`${operationPath}.port`, "observe requires a read tool port");
+          }
+          this.verifyArguments(
+            operation.arguments,
+            port.parameters,
+            state.environment,
+            `${operationPath}.arguments`,
+          );
+          this.bindControl(
+            operation.destination,
+            port.returns,
+            state.environment,
+            reservedBindings,
+            `${operationPath}.destination`,
+          );
+          break;
+        }
+        case "infer": {
+          exactKeys(
+            operation,
+            ["op", "site", "destination", "port", "arguments", "limits"],
+            operationPath,
+          );
+          this.verifySite(operation.site, expectedSite, `${operationPath}.site`);
+          const port = this.requirePort(operation.port, "model", operationPath);
+          this.verifyArguments(
+            operation.arguments,
+            port.parameters,
+            state.environment,
+            `${operationPath}.arguments`,
+          );
+          const limitsPath = `${operationPath}.limits`;
+          const limits = objectAt(operation.limits, limitsPath);
+          exactKeys(limits, ["inputBytes", "outputBytes", "attempts"], limitsPath);
+          integerAt(limits.inputBytes, `${limitsPath}.inputBytes`, 1);
+          integerAt(limits.outputBytes, `${limitsPath}.outputBytes`, 1);
+          const attempts = integerAt(
+            limits.attempts,
+            `${limitsPath}.attempts`,
+            1,
+          );
+          if (attempts > MAX_INFER_ATTEMPTS) {
+            reject(
+              `${limitsPath}.attempts`,
+              `Core 0.2 infer attempts cannot exceed ${MAX_INFER_ATTEMPTS}`,
+            );
+          }
+          this.bindControl(
+            operation.destination,
+            { kind: "candidate", value: port.returns },
+            state.environment,
+            reservedBindings,
+            `${operationPath}.destination`,
+          );
+          break;
+        }
+        case "validate": {
+          exactKeys(
+            operation,
+            ["op", "site", "destination", "port", "arguments"],
+            operationPath,
+          );
+          this.verifySite(operation.site, expectedSite, `${operationPath}.site`);
+          const port = this.requirePort(operation.port, "validator", operationPath);
+          this.verifyArguments(
+            operation.arguments,
+            port.parameters,
+            state.environment,
+            `${operationPath}.arguments`,
+          );
+          this.bindControl(
+            operation.destination,
+            port.returns,
+            state.environment,
+            reservedBindings,
+            `${operationPath}.destination`,
+          );
+          break;
+        }
+        case "act": {
+          exactKeys(
+            operation,
+            [
+              "op",
+              "site",
+              "destination",
+              "port",
+              "arguments",
+              "idempotencyKey",
+            ],
+            operationPath,
+          );
+          this.verifySite(operation.site, expectedSite, `${operationPath}.site`);
+          const port = this.requirePort(operation.port, "tool", operationPath);
+          if (port.mode !== "write") {
+            reject(`${operationPath}.port`, "act requires a write tool port");
+          }
+          this.verifyArguments(
+            operation.arguments,
+            port.parameters,
+            state.environment,
+            `${operationPath}.arguments`,
+          );
+          this.verifyExpression(
+            operation.idempotencyKey,
+            `${operationPath}.idempotencyKey`,
+            state.environment,
+            named("Text"),
+          );
+          this.bindControl(
+            operation.destination,
+            port.returns,
+            state.environment,
+            reservedBindings,
+            `${operationPath}.destination`,
+          );
+          for (const obligation of state.obligations.values()) {
+            if (
+              obligation.mode === "state" &&
+              obligation.status === "satisfied"
+            ) {
+              obligation.status = "stale";
+            }
+          }
+          for (const proof of state.evidence.values()) {
+            if (proof.mode === "state") {
+              proof.valid = false;
+            }
+          }
+          break;
+        }
+        case "verify": {
+          exactKeys(
+            operation,
+            ["op", "site", "destination", "port", "arguments", "proposition"],
+            operationPath,
+          );
+          this.verifySite(operation.site, expectedSite, `${operationPath}.site`);
+          const port = this.requirePort(operation.port, "verifier", operationPath);
+          const proposition = identifierAt(
+            operation.proposition,
+            `${operationPath}.proposition`,
+          );
+          const declaration = this.propositions.get(proposition);
+          if (declaration === undefined) {
+            reject(`${operationPath}.proposition`, "unknown proposition");
+          }
+          if (port.proposition !== proposition) {
+            reject(
+              `${operationPath}.proposition`,
+              `verifier ${JSON.stringify(port.name)} proves ${JSON.stringify(port.proposition)}, not ${JSON.stringify(proposition)}`,
+            );
+          }
+          this.verifyArguments(
+            operation.arguments,
+            port.parameters,
+            state.environment,
+            `${operationPath}.arguments`,
+          );
+          const destination = this.bindControl(
+            operation.destination,
+            { kind: "evidence", proposition },
+            state.environment,
+            reservedBindings,
+            `${operationPath}.destination`,
+          );
+          state.evidence.set(destination, {
+            proposition,
+            mode: declaration.mode,
+            valid: true,
+            consumed: false,
+          });
+          break;
+        }
+        case "satisfy": {
+          exactKeys(
+            operation,
+            ["op", "site", "obligation", "evidence"],
+            operationPath,
+          );
+          this.verifySite(operation.site, expectedSite, `${operationPath}.site`);
+          const obligationName = identifierAt(
+            operation.obligation,
+            `${operationPath}.obligation`,
+          );
+          const obligation = state.obligations.get(obligationName);
+          if (obligation === undefined) {
+            reject(`${operationPath}.obligation`, "unknown obligation");
+          }
+          if (obligation.status === "satisfied") {
+            reject(`${operationPath}.obligation`, "obligation is already satisfied");
+          }
+          const evidenceName = identifierAt(
+            operation.evidence,
+            `${operationPath}.evidence`,
+          );
+          const proof = state.evidence.get(evidenceName);
+          if (proof === undefined || proof.consumed) {
+            reject(`${operationPath}.evidence`, "unknown or consumed verifier evidence");
+          }
+          if (proof.proposition !== obligation.proposition) {
+            reject(`${operationPath}.evidence`, "evidence proposition does not match obligation");
+          }
+          if (!proof.valid) {
+            reject(`${operationPath}.evidence`, "state evidence is stale after an act");
+          }
+          proof.consumed = true;
+          obligation.status = "satisfied";
+          break;
+        }
+        case "assert": {
+          exactKeys(
+            operation,
+            ["op", "site", "condition", "message"],
+            operationPath,
+          );
+          this.verifySite(operation.site, expectedSite, `${operationPath}.site`);
+          if (operation.message !== "Axiom assertion failed") {
+            reject(
+              `${operationPath}.message`,
+              "compiler-emitted assertions use the canonical failure message",
+            );
+          }
+          this.verifyExpression(
+            operation.condition,
+            `${operationPath}.condition`,
+            state.environment,
+            named("Bool"),
+          );
+          break;
+        }
+        case "if": {
+          exactKeys(
+            operation,
+            ["op", "site", "condition", "then", "otherwise"],
+            operationPath,
+          );
+          this.verifySite(operation.site, expectedSite, `${operationPath}.site`);
+          this.verifyExpression(
+            operation.condition,
+            `${operationPath}.condition`,
+            state.environment,
+            named("Bool"),
+          );
+          const thenState = this.cloneControlState(state);
+          const elseState = this.cloneControlState(state);
+          this.verifyControlBlock(
+            operation.then,
+            `${operationPath}.then`,
+            thenState,
+            returns,
+            sites,
+            reservedBindings,
+            depth + 1,
+            insideRepeat,
+            false,
+          );
+          this.verifyControlBlock(
+            operation.otherwise,
+            `${operationPath}.otherwise`,
+            elseState,
+            returns,
+            sites,
+            reservedBindings,
+            depth + 1,
+            insideRepeat,
+            false,
+          );
+          const thenContinues = this.controlBlockContinues(operation.then);
+          const elseContinues = this.controlBlockContinues(operation.otherwise);
+          if (!thenContinues && !elseContinues) {
+            reject(
+              operationPath,
+              "at least one conditional branch must continue",
+            );
+          }
+          for (const [id, obligation] of state.obligations) {
+            const thenObligation = thenState.obligations.get(id);
+            const elseObligation = elseState.obligations.get(id);
+            if (thenObligation === undefined || elseObligation === undefined) {
+              reject(operationPath, "branch lost an obligation");
+            }
+            if (
+              thenContinues &&
+              elseContinues &&
+              thenObligation.status !== elseObligation.status
+            ) {
+              reject(
+                operationPath,
+                `branches leave obligation ${JSON.stringify(id)} in different states`,
+              );
+            }
+            obligation.status = thenContinues
+              ? thenObligation.status
+              : elseObligation.status;
+          }
+          for (const [name, proof] of state.evidence) {
+            const thenProof = thenState.evidence.get(name);
+            const elseProof = elseState.evidence.get(name);
+            if (thenProof === undefined || elseProof === undefined) {
+              reject(operationPath, "branch lost pre-existing evidence state");
+            }
+            proof.consumed =
+              (thenContinues && thenProof.consumed) ||
+              (elseContinues && elseProof.consumed);
+            proof.valid =
+              (!thenContinues || thenProof.valid) &&
+              (!elseContinues || elseProof.valid);
+          }
+          break;
+        }
+        case "repeat": {
+          exactKeys(
+            operation,
+            ["op", "site", "maxIterations", "body", "until"],
+            operationPath,
+          );
+          this.verifySite(operation.site, expectedSite, `${operationPath}.site`);
+          const maxIterations = integerAt(
+            operation.maxIterations,
+            `${operationPath}.maxIterations`,
+            1,
+          );
+          if (maxIterations > MAX_REPEAT_ITERATIONS) {
+            reject(
+              `${operationPath}.maxIterations`,
+              `repeat max cannot exceed ${MAX_REPEAT_ITERATIONS}`,
+            );
+          }
+          const body = arrayAt(operation.body, `${operationPath}.body`);
+          if (body.length === 0) {
+            reject(`${operationPath}.body`, "repeat body cannot be empty");
+          }
+          const loopState = this.cloneControlState(state);
+          const outerBindings = new Set(state.environment.keys());
+          this.verifyControlBlock(
+            body,
+            `${operationPath}.body`,
+            loopState,
+            returns,
+            sites,
+            reservedBindings,
+            depth + 1,
+            true,
+            false,
+          );
+          if (!this.controlBlockHasEffect(body)) {
+            reject(`${operationPath}.body`, "repeat body must contain an external effect");
+          }
+          this.verifyExpression(
+            operation.until,
+            `${operationPath}.until`,
+            loopState.environment,
+            named("Bool"),
+          );
+          const localBindings = new Set(
+            [...loopState.environment.keys()].filter(
+              (name) => !outerBindings.has(name),
+            ),
+          );
+          const conditionBindings = this.controlExpressionVariables(
+            operation.until as AirExpr,
+          );
+          if (![...conditionBindings].some((name) => localBindings.has(name))) {
+            reject(
+              `${operationPath}.until`,
+              "repeat condition must depend on a body-local binding",
+            );
+          }
+          for (const [id, obligation] of state.obligations) {
+            const loopObligation = loopState.obligations.get(id);
+            if (loopObligation === undefined) {
+              reject(operationPath, "repeat body lost an obligation");
+            }
+            obligation.status = loopObligation.status;
+          }
+          for (const [name, proof] of state.evidence) {
+            const loopProof = loopState.evidence.get(name);
+            if (loopProof === undefined) {
+              reject(operationPath, "repeat body lost pre-existing evidence");
+            }
+            proof.consumed = loopProof.consumed;
+            proof.valid = loopProof.valid;
+          }
+          break;
+        }
+        case "complete": {
+          exactKeys(operation, ["op", "site", "value"], operationPath);
+          this.verifySite(operation.site, expectedSite, `${operationPath}.site`);
+          const unresolved = [...state.obligations.entries()]
+            .filter(([, obligation]) => obligation.status !== "satisfied")
+            .map(([id, obligation]) => `${id} (${obligation.status})`);
+          if (unresolved.length !== 0) {
+            reject(
+              operationPath,
+              `complete has unresolved obligation(s): ${unresolved.join(", ")}`,
+            );
+          }
+          this.verifyExpression(
+            operation.value,
+            `${operationPath}.value`,
+            state.environment,
+            returns,
+          );
+          break;
+        }
+        case "fail":
+          exactKeys(operation, ["op", "site", "message"], operationPath);
+          this.verifySite(operation.site, expectedSite, `${operationPath}.site`);
+          stringAt(operation.message, `${operationPath}.message`);
+          break;
+        default:
+          reject(`${operationPath}.op`, `unknown operation ${JSON.stringify(op)}`);
+      }
+    });
+  }
+
+  private bindControl(
+    value: unknown,
+    type: AirType,
+    environment: Map<string, AirType>,
+    reservedBindings: Set<string>,
+    path: string,
+  ): string {
+    const name = identifierAt(value, path);
+    if (reservedBindings.has(name)) {
+      reject(path, `duplicate immutable binding ${JSON.stringify(name)}`);
+    }
+    reservedBindings.add(name);
+    environment.set(name, type);
+    return name;
+  }
+
+  private controlBlockContinues(value: unknown): boolean {
+    const operations = arrayAt(value, "$control");
+    if (operations.length === 0) {
+      return true;
+    }
+    const final = objectAt(
+      operations[operations.length - 1],
+      `$control[${operations.length - 1}]`,
+    );
+    return final.op !== "fail";
+  }
+
+  private cloneControlState(state: ControlState): ControlState {
+    return {
+      environment: new Map(state.environment),
+      obligations: new Map(
+        [...state.obligations].map(([id, obligation]) => [
+          id,
+          { ...obligation },
+        ]),
+      ),
+      evidence: new Map(
+        [...state.evidence].map(([name, proof]) => [name, { ...proof }]),
+      ),
+    };
+  }
+
+  private controlBlockHasEffect(value: readonly unknown[]): boolean {
+    return value.some((operationValue, index) => {
+      const operation = objectAt(operationValue, `$control[${index}]`);
+      const op = stringAt(operation.op, `$control[${index}].op`);
+      if (["observe", "infer", "validate", "act", "verify"].includes(op)) {
+        return true;
+      }
+      if (op === "if") {
+        return this.controlBlockHasEffect(
+          arrayAt(operation.then, `$control[${index}].then`),
+        ) || this.controlBlockHasEffect(
+          arrayAt(operation.otherwise, `$control[${index}].otherwise`),
+        );
+      }
+      if (op === "repeat") {
+        return this.controlBlockHasEffect(
+          arrayAt(operation.body, `$control[${index}].body`),
+        );
+      }
+      return false;
+    });
+  }
+
+  private controlExpressionVariables(expression: AirExpr): Set<string> {
+    const variables = new Set<string>();
+    const visit = (value: AirExpr): void => {
+      switch (value.kind) {
+        case "variable":
+          variables.add(value.name);
+          return;
+        case "array":
+          value.items.forEach(visit);
+          return;
+        case "record":
+          value.fields.forEach((field) => visit(field.value));
+          return;
+        case "field":
+          visit(value.target);
+          return;
+        case "call":
+          value.arguments.forEach(visit);
+          return;
+        case "binary":
+          visit(value.left);
+          visit(value.right);
+          return;
+        case "literal":
+          return;
+      }
+    };
+    visit(expression);
+    return variables;
+  }
+
+  private controlBounds(
+    operations: readonly AirOp[],
+  ): { readonly operations: number; readonly effects: number } {
+    const cappedAdd = (left: number, right: number): number =>
+      Math.min(MAX_TASK_EFFECT_BOUND + 1, left + right);
+    const cappedMultiply = (value: number, multiplier: number): number =>
+      Math.min(MAX_TASK_EFFECT_BOUND + 1, value * multiplier);
+    let operationBound = 0;
+    let effectBound = 0;
+    for (const operation of operations) {
+      let operationCost = 1;
+      let effectCost = 0;
+      switch (operation.op) {
+        case "observe":
+        case "validate":
+        case "act":
+        case "verify":
+          effectCost = 1;
+          break;
+        case "infer":
+          effectCost = operation.limits.attempts;
+          break;
+        case "if": {
+          const then = this.controlBounds(operation.then);
+          const otherwise = this.controlBounds(operation.otherwise);
+          operationCost = cappedAdd(
+            1,
+            Math.max(then.operations, otherwise.operations),
+          );
+          effectCost = Math.max(then.effects, otherwise.effects);
+          break;
+        }
+        case "repeat": {
+          const body = this.controlBounds(operation.body);
+          operationCost = cappedAdd(
+            1,
+            cappedMultiply(body.operations, operation.maxIterations),
+          );
+          effectCost = cappedMultiply(
+            body.effects,
+            operation.maxIterations,
+          );
+          break;
+        }
+        case "satisfy":
+        case "assert":
+        case "complete":
+        case "fail":
+          break;
+      }
+      operationBound = cappedAdd(operationBound, operationCost);
+      effectBound = cappedAdd(effectBound, effectCost);
+    }
+    return { operations: operationBound, effects: effectBound };
   }
 
   private verifySite(value: unknown, expected: number, path: string): void {

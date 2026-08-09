@@ -13,6 +13,7 @@ export {
   artifactProgramHash,
   semanticProgramHash,
   SEMANTIC_HASH_DOMAIN,
+  SEMANTIC_HASH_DOMAIN_0_2,
 } from "./program-hash.ts";
 export {
   CanonicalJsonError,
